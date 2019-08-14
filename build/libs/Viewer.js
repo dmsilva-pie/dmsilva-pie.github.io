@@ -34,7 +34,7 @@ function loadModel() {
 			 model_param = {
                         modelSelected: model_uri,
 						numberFaces: model_info.face_number, 
-                        imageMappings: [...Array(data.face_number).keys()].map(item => ({ index: item, img: '../img/'+(item+1)+'.png', enabled: false })),
+                        imageMappings: [...Array(data.face_number).keys()].map(item => ({ index: item, img: './img/'+(item+1)+'.png', enabled: false })),
                         scaleValues: [...Array(data.face_number).keys()].map(i => (data.faces[i].max_extrude)),
                         resolutionValues: [...Array(data.face_number).keys()].map(i => 0),
                         textureBounds: [1, 0, 1, 0],
@@ -58,7 +58,7 @@ function updateModel(model_settings, color, wireframeView, textureView){
 	 model_param = {
                         modelSelected: model_uri,
 						numberFaces: model_info.face_number, 
-                        imageMappings: [...Array(model_info.face_number).keys()].map(item => ({ index: item, img: '../img/'+(item+1)+'.png', enabled: false })),
+                        imageMappings: [...Array(model_info.face_number).keys()].map(item => ({ index: item, img: './img/'+(item+1)+'.png', enabled: false })),
                         scaleValues: model_settings.scaleValues,
                         resolutionValues: model_settings.resolutionValues,
                         textureBounds: [1, 0, 1, 0],
