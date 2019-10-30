@@ -1,6 +1,6 @@
 {
-  "short_name": "Prototype Test",
-  "name": "Prototype Lithographic Tool Test",
+  "short_name": "React App",
+  "name": "Create React App Sample",
   "icons": [
     {
       "src": "favicon.ico",

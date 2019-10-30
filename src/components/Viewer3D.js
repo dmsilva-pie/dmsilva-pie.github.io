@@ -11,33 +11,33 @@ import Fade from '@material-ui/core/Fade';
 import CircularProgress from '@material-ui/core/CircularProgress';
 
 export default class Viewer3D extends Component {
-	
+
 	constructor(props) {
 		super(props);
-        this.state = {
+		this.state = {
 			loading: false
 		};
-    }
-	
-	componentDidMount(){
+	}
+
+	componentDidMount() {
 		window.createScene();
 	}
-	
+
 	render() {
-	  return (
-		<div id="viewer">
-		<div id="loadingScreen">
-        <Fade
-          in={this.props.loading}
-          style={{
-            transitionDelay: this.state.loading ? '800ms' : '0ms',
-          }}
-          unmountOnExit
-        >
-          <CircularProgress disableShrink size={100}/>
-        </Fade>
-      </div>
-	  </div>
-	  );
+		return (
+			<div id="viewer">
+				<div id="loadingScreen">
+					<Fade
+						in={this.props.loading}
+						style={{
+							transitionDelay: this.state.loading ? '800ms' : '0ms',
+						}}
+						unmountOnExit
+					>
+						<CircularProgress disableShrink size={100} />
+					</Fade>
+				</div>
+			</div>
+		);
 	}
 }

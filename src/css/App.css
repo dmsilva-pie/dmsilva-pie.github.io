@@ -1,43 +1,20 @@
-.App {
-  text-align: center;
-}
-
-.App-logo {
-  animation: App-logo-spin infinite 20s linear;
-  height: 40vmin;
-  pointer-events: none;
-}
-
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
-}
-
-.App-link {
-  color: #61dafb;
-}
-
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 #viewer {
 	position: relative;
 	width: 100%;
 	height: 100%;
 	outline-style: ridge;
 	background-image: linear-gradient(black, grey);
+}
+
+#viewer-container {
+	height: 100%;
+	/* Firefox */
+	width: -moz-calc(100% - 60px);
+	/* WebKit */
+	width: -webkit-calc(100% - 60px);
+	/* Opera */
+	width: -o-calc(100% - 60px);
+	width: calc(100% - 60px);
 }
 
 #loadingScreen {
@@ -61,13 +38,25 @@
 }
 
 .showonfocus {
-							width: "100%";
-							height: "100%";
+	width: "100%";
+	height: "100%";
     opacity: 0;
 }
 
 .showonfocus:hover {
-							width: "100%";
-							height: "100%";
+	width: "100%";
+	height: "100%";
     opacity: 1;
 }
+
+.buttonlink {
+	background: none!important;
+	border: none;
+	padding: 0!important;
+	/*optional*/
+	font-family: arial, sans-serif;
+	/*input has OS specific font-family*/
+	color: #069;
+	text-decoration: underline;
+	cursor: pointer;
+  }

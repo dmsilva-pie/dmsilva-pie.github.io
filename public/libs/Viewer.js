@@ -1,3 +1,6 @@
+//import THREE from "/threejs/build/three.js";
+//import * as THREE from "threejs/build/three.js";
+
 //Scene/Model variables
 var container, camera, controls, scene, renderer1;
 var hasMesh = false;
@@ -125,6 +128,8 @@ function createScene() {
     var controls = new THREE.OrbitControls(camera, renderer1.domElement);
     controls.addEventListener('change', render);
     controls.target.set(0, 1.2, 2);
+	controls.minPolarAngle = 0.05;
+	controls.maxPolarAngle = 1.65;
     controls.update();
 
     window.addEventListener('resize', onWindowResize, false);
@@ -355,6 +360,79 @@ function loadTextures(mappingImages) {
     }
 }
 
+/*function loadObject2(p){
+	
+	var loader = new THREE.OBJLoader(manager);
+	var assetList = ["/models/base3.obj","/models/01_hi.obj"];
+	var loaderPool = [];
+	var loadedMeshes = [];
+	var materialsList = [];
+	
+	var onProgress = function (xhr) { };
+    var onError = function (xhr) { reject() };
+	
+	assetList.forEach( (asset, index) => {
+		
+		var loaderPromise = new Promise((resolve, reject) => {		
+			
+			loader.load(asset, function (object) {
+				object.name = 'group';
+				model_mesh = object;
+				object.traverse(function (child) {
+					if (child instanceof THREE.Mesh) {
+						var geo_aux = new THREE.Geometry().fromBufferGeometry(child.geometry);
+						//geo_aux.normalize();
+						geo_aux.rotateX(Math.PI/2);
+						child.geometry = new THREE.BufferGeometry().fromGeometry(geo_aux);
+						child.geometry.scale(10, 10, 10);
+						child.geometry.computeFaceNormals();
+						child.geometry.uvsNeedUpdate = true;
+						child.geometry.elementsNeedUpdate = true;
+						child.geometry.verticesNeedUpdate = true;
+						child.geometry.normalsNeedUpdate = true;
+						child.geometry.computeBoundingBox();
+						//model = child;
+						
+						var materials = [];
+						var meshMaterial = new THREE.MeshPhongMaterial({
+							color: 0xFFFFFF,
+							wireframe: true
+						});
+						materials.push(meshMaterial);
+
+						var mesh = new THREE.Mesh(child.geometry, materials);
+						mesh.castShadow = true;
+						model_mesh.children[0] = mesh;
+						//scene.add(model_mesh);
+						
+						loadedMeshes.push(model_mesh);
+						
+						resolve();
+					}
+				});
+			}, onProgress, onError);	
+			
+		});
+		
+		loaderPool.push(loaderPromise);
+		
+	});
+	
+	Promise.all(loaderPool).then(() => {
+		var group = new THREE.Group();
+		
+		for(var mesh of loadedMeshes){
+			group.add( mesh );
+		}
+		
+		scene.add( group );
+	});
+	
+}*/
+
+
+
+
 function loadObject(params) {
 
     return new Promise((resolve, reject) => {
@@ -362,20 +440,58 @@ function loadObject(params) {
 		if (hasMesh)
             scene.remove(model_mesh);
 
-        /*_____Load object________*/
+        //_____Load object________ params.modelSelected "/models/cube_test.obj"
         var onProgress = function (xhr) { };
         var onError = function (xhr) { reject() };
-
+		
         var loader = new THREE.OBJLoader(manager);
         loader.load(params.modelSelected, function (object) {
             object.name = 'group';
             model_mesh = object;
+            //console.log(object);
             object.traverse(function (child) {
+                
                 if (child instanceof THREE.Mesh) {
-                    var geo_aux = new THREE.Geometry().fromBufferGeometry(child.geometry);
+                    /*var geo_aux = new THREE.Geometry().fromBufferGeometry(child.geometry);
                     geo_aux.normalize();
-                    child.geometry = new THREE.BufferGeometry().fromGeometry(geo_aux);
+                    child.geometry = new THREE.BufferGeometry().fromGeometry(geo_aux);*/
+
+                    //Normalize and center the model
+                    var amount = child.geometry.getAttribute('position').count / 3;
+                    var vertices = child.geometry.getAttribute('position').array;
+                    var xS = vertices[0], yS = vertices[1], zS = vertices[2];
+                    var xL = vertices[0], yL = vertices[1], zL = vertices[2];
+                    
+                    for(var i = 0; i < amount; i++){
+
+                        var x = vertices[i*3];
+                        var y = vertices[(i*3)+1];
+                        var z = vertices[(i*3)+2];
+
+                        xS = (xS > x) ? x : xS;
+                        yS = (yS > y) ? y : yS;
+                        zS = (zS > z) ? z : zS;
+
+                        xL = (xL < x) ? x : xL;
+                        yL = (yL < y) ? y : yL;
+                        zL = (zL < z) ? z : zL;
+                    }
+
+                    child.geometry.translate(-(xS+xL)/2, -(yS+yL)/2, -(zS+zL)/2);
+
+                    var xM = (Math.max(Math.abs(xL),Math.abs(xS))-((xS+xL)/2));
+                    var yM = (Math.max(Math.abs(yL),Math.abs(yS))-((yS+yL)/2));
+                    var zM = (Math.max(Math.abs(zL),Math.abs(zS))-((zS+zL)/2));
+
+                    var scaleFactor = 1/Math.sqrt(Math.pow(xM, 2)+Math.pow(yM, 2)+Math.pow(zM, 2));
+                    child.geometry.scale(scaleFactor, scaleFactor, scaleFactor);
+                    
+
                     child.geometry.scale(50, 50, 50);
+                    child.geometry.uvsNeedUpdate = true;
+					child.geometry.elementsNeedUpdate = true;
+					child.geometry.verticesNeedUpdate = true;
+					child.geometry.normalsNeedUpdate = true;    
                     child.geometry.computeBoundingBox();
                     model = child;
 					

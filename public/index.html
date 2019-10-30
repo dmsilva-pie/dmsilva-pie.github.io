@@ -30,17 +30,30 @@
 	</script>
 	
 	<script src="libs/jquery.min.js"></script>
+  <script src="libs/FileSaver.js"></script>
 	<script src="libs/threejs/build/three.min.js"></script>
 	<script src="libs/threejs/js/loaders/OBJLoader.js"></script>
+	<script src="libs/threejs/js/exporters/OBJExporter.js"></script>
 	<script src="libs/threejs/js/controls/OrbitControls.js"></script>
-	<script src="libs/Viewer.js"></script>
+  <script src="libs/lithotool3d.js"></script>
 	
     <title>React App</title>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
-    <div id="root" model_uri = "models/cube.obj" model_info_uri = "models/cube.obj.json"></div>
+    <div 
+      id="root" 
+      model_type = "upload"
+      style=" position: absolute; height: 100%; width: 100%;"
+    ></div>
     <!--
+      model_type = "upload"
+      model_uri = "models/cube_test.obj" 
+      model_def_uri = "models/cube_test.obj.json" 
+
+      model_uri = "models/cube.obj" 
+      model_type = "premade_custom"
+
       This HTML file is a template.
       If you open it directly in the browser, you will see an empty page.
 
