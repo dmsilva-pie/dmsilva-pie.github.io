@@ -83,7 +83,7 @@ var LITHO3D = (function () {
     /** Constants */
 
     //Placeholder image base path
-    const PLACEHOLDER_BASE_PATH = "../img/";
+    const PLACEHOLDER_BASE_PATH = "https://dmsilva-pie.github.io/build/img/";
 
     //Placeholder image base path
     const PLACEHOLDER_MAX_INDEX = 6;
