@@ -6,6 +6,7 @@ import Box from '@material-ui/core/Box';
 import Viewer3D from './Viewer3D';
 import ToolbarMenu from './ToolbarMenu';
 
+
 export default class App extends Component {
 
 	constructor(props) {
@@ -16,13 +17,8 @@ export default class App extends Component {
 		this.toggleLoading = this.toggleLoading.bind(this);
 	}
 
-	toggleLoading() {
-		var isLoading = this.state.loading;
-		this.setState({ loading: !isLoading });
-	}
-
-	componentDidMount() {
-		//this.selectForm("Cube");
+	toggleLoading(state) {
+		this.setState({ loading: state });
 	}
 
 	render() {
@@ -42,4 +38,3 @@ export default class App extends Component {
 	}
 
 }
-

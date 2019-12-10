@@ -1,599 +1,864 @@
 /* 
- * Lithographic costumization 3D Viewer
+ * *
+ * * Lithographic 3D customization tool v1.8.0
+ * *
+ * * Aplication for the customization and visualization of 3D models.
+ * * Using reference images, it facilitates model personalization.
+ * *
  *
- * Authors: Diogo Silva, Mafalda ...
+ * @author Diogo Mil-Homens da Silva
+ * 
+ * University NOVA - School of Science and Technology
+ * Department of Computer Science
  * 
  * For inquiries: dm-.silva@campus.fct.unl
  *
  */
 
-//import * as THREE from './threejs/build/three.js';
+'use strict';
+
+//import * as THREE from 'three';
+
 //import { OrbitControls } from './threejs/examples/jsm/controls/OrbitControls.js';
+//import { OBJLoader } from './threejs/examples/jsm/loaders/OBJLoader.js';
+//import { STLLoader } from './threejs/examples/jsm/loaders/STLLoader.js';
+//import { GLTFLoader } from './threejs/examples/jsm/loaders/GLTFLoader.js';
+//import { OBJExporter } from './threejs/examples/jsm/exporters/OBJExporter.js';
+//import { STLExporter } from './threejs/examples/jsm/exporters/STLExporter.js';
+//import { GLTFExporter } from './threejs/examples/jsm/exporters/GLTFExporter.js';
+//import { BufferGeometryUtils } from './threejs/examples/jsm/utils/BufferGeometryUtils.js';
+//import { saveAs } from 'file-saver';
+//import { JSZip } from 'jszip';
 
-//"use strict";
+var LITHO3D = (function () {
 
-//Scene variables
-var container, scene, renderer, camera, controls;
-var manager = new THREE.LoadingManager();
-var textureLoader = new THREE.TextureLoader(manager);
-var imageLoader = new THREE.ImageLoader(manager);
-var helper;
+    /** Variables */
 
-//Model variables
-var modelType = "";
+    /* Scene variables */
+    var container, scene, renderer, camera, controls, helper;
+    var manager = new THREE.LoadingManager();
+    var textureLoader = new THREE.TextureLoader(manager);
+    var imageLoader = new THREE.ImageLoader(manager);
 
-var group_root = null;
-var models = [], models_map = {},
-    surfaces = [], surfaces_map = {},
-    og_surfaces = [], curr_surfaces = [];
+    /* Model/Mesh/Geometry variables */
+    var modelType = "";
+    var modelFormat = "";
 
-var lodState = [];
-var scaleState = [];
+    var group_root = null;
+    var models = [], models_map = {},
+        surfaces = [], surfaces_map = {},
+        og_surfaces = [], curr_surfaces = [],
+        og_surface_borders = [], curr_surface_borders = [],
+        surfaceAspectRatios = [];
 
-var scaleFactor = 1; //How much scaling to normalize mesh size.
-var translateFactor = { x: 0, y: 0, z: 0 }; //How much translation to center objects.
+    var scaleFactor = 1; //How much scaling to normalize mesh size.
+    var translateFactor = { x: 0, y: 0, z: 0 }; //How much translation to center objects.
 
-//Materials/Texture
-var viewerMode = "color";
-var colorMaterial, wireMaterial;
-var surfaceMaterials = [];
-var textures = [];
+    /* Materials/Textures */
+    var colorMaterial, wireMaterial;
+    var surfaceMaterials = [];
+    var textures = [];
 
-var surfaceState = [];
-var referenceImages = [];
-var refType = [];
+    /* State variables */
+    var currentColor = "#F4F4F4";
+    var viewerMode = "color";
+    var positionState = [];
+    var surfaceState = [];
+    var referenceImages = [];
+    var refType = [];
+    var lodState = [];
+    var scaleState = [];
 
-//Constants
-const MODEL_ID = ["base", "model"];
-const SCALE_UNIFORM = [50, 50, 50];
-const REF_TYPE = Object.freeze({
-    POSITIVE: "positive",
-    NEGATIVE: "negative"
-});
-const MIN_MED_THRESHOLD = 65536;
+    /* FPS control */
+    var clock = null;
+    var delta = 0;
+    var interval = 1 / 30;
 
-//Misc
-var isMobile = (/Mobi|Android/i.test(navigator.userAgent));
-
-var clock = null;
-var delta = 0;
-var interval = 1 / 30;
-
-/** ___________Setup Functions_________ */
-function createScene() {
-
-    if (scene != null)
-        return;
-
-    container = document.getElementById('viewer');
-
-    /**________CAMERA______________*/
-
-    camera = new THREE.PerspectiveCamera(30, container.clientWidth / container.clientHeight, 1, 1000);
-    camera.up.set(0, 1, 0);
-    camera.position.set(300, 20, 0);
-    camera.add(new THREE.PointLight(0xffffff, 0.8));
-
-    /** _______SCENE______________ */
-
-    scene = new THREE.Scene();
-    scene.add(camera);
-
-    helper = new THREE.GridHelper(260, 20, 0xFF5555, 0xF0F0F0);
-    helper.position.y = -40;
-    scene.add(helper);
-
-    renderer = new THREE.WebGLRenderer({ alpha: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    container.appendChild(renderer.domElement);
-
-    /*_____CONTROLS________*/
-    var controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.addEventListener('change', render);
-    controls.target.set(0, 1.2, 2);
-    controls.minPolarAngle = 0.05;
-    controls.maxPolarAngle = 1.65;
-    controls.update();
-
-    window.addEventListener('resize', onWindowResize, false);
-
-    /*if(isMobile){
-        clock = new THREE.Clock();
-        animateMobile();
-    }
-    else
-        animate();*/
-    animate();
-}
-
-function onWindowResize() {
-    camera.aspect = (container.clientWidth) / (container.clientHeight);
-    camera.updateProjectionMatrix();
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    render();
-}
-
-function animate() {
-    requestAnimationFrame(animate);
-    render();
-}
-
-function animateMobile() {
-    requestAnimationFrame(animateMobile);
-    delta += clock.getDelta();
-
-    if (delta > interval) {
-        render();
-        delta = delta % interval;
-    }
-}
-
-function render() {
-    camera.lookAt(scene.position);
-    renderer.render(scene, camera);
-}
-
-function resetScene() {
-    scene.remove(group_root);
-
-    curr_surfaces.forEach(surface => surface.dispose());
-    og_surfaces.forEach(surface => surface.dispose());
-    surfaces.forEach(surface => surface.geometry.dispose());
-    models.forEach(surface => surface.geometry.dispose());
-
-    curr_surfaces = [];
-    og_surfaces = [];
-    surfaces = [];
-    models = [];
-
-    models_map = {};
-    surfaces_map = {};
-
-    colorMaterial.dispose();
-    colorMaterial = null;
-    wireMaterial.dispose();
-    wireMaterial = null;
-    textures.forEach(tex => tex && tex.dispose());
-    textures = [];
-    surfaceMaterials.forEach(mat => mat.dispose());
-    surfaceMaterials = [];
-
-    lodState = [];
-    scaleState = [];
-    surfaceState = [];
-    referenceImages = [];
-    refType = [];
-
-    group_root = null;
-}
+    /* Asset URLs */
+    var modelURL = "";
+    var jsonURL = "";
+    var imageURLs = [];
 
 
-/** ___________API Functions_________ */
+    /** Constants */
 
-function loadModel(uri, type, color) {
+    //Placeholder image base path
+    const PLACEHOLDER_BASE_PATH = "../img/";
 
-    return new Promise((resolve, reject) => {
+    //Placeholder image base path
+    const PLACEHOLDER_MAX_INDEX = 6;
 
-        if (group_root) {
-            //Reset model data and scene, memory management
-            resetScene();
+    //Any mesh with this id/name is considered static, preventing customization.
+    const MODEL_ID = ["base", "model", "exclude", "ignore"];
+
+    //Default scaling of model (x,y,z)
+    const SCALE_UNIFORM = [50, 50, 50];
+
+    //Reference types
+    const REF_TYPE = Object.freeze({
+        POSITIVE: "positive",
+        NEGATIVE: "negative"
+    });
+    //Model origin types
+    const MODELTYPES = Object.freeze({
+        UPLOAD: "upload", // Uploaded by user
+        PREMADE: "premade", // Premade as product
+        RECONSTRUCT: "reconstruction" // Premade as 3D reconstruction base
+    });
+    //Viewer modes
+    const VIEWMODES = Object.freeze({
+        WIREFRAME: "wireframe",
+        TEXTURE: "texture",
+        COLOR: "color"
+    });
+
+    //Minimum desired vertice count on medium detail setting of tesselation.
+    const MIN_MED_THRESHOLD = 131072 * 2;
+
+    const IS_MOBILE = (/Mobi|Android/i.test(navigator.userAgent));
+
+
+
+    /*** SETUP METHODS ***/
+
+    /**
+     * Creates the 3D scene on a HTML container. If not specified, uses the one with 'viewer' as id.
+     * @param {HTMLElement} container The container in which to render the scene.
+     */
+    function createScene(container = null, limitMobileFPS = true) {
+
+        if (scene != null)
+            return;
+        if (container === null || !(container instanceof HTMLDocument))
+            container = document.getElementById('viewer');
+        if (container === null)
+            return;
+
+        //Camera
+        camera = new THREE.PerspectiveCamera(30, container.clientWidth / container.clientHeight, 1, 1000);
+        camera.up.set(0, 1, 0);
+        camera.position.set(300, 20, 0);
+        camera.add(new THREE.PointLight(0xffffff, 0.8));
+
+        //Scene
+        scene = new THREE.Scene();
+        scene.add(camera);
+
+        helper = new THREE.GridHelper(260, 20, 0xFF5555, 0xF0F0F0);
+        helper.position.y = -50;
+        scene.add(helper);
+
+        renderer = new THREE.WebGLRenderer({ alpha: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        //Controls
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.addEventListener('change', render);
+        controls.target.set(0, 1.2, 2);
+        controls.minPolarAngle = 0.05;
+        controls.maxPolarAngle = 1.75;
+        controls.minDistance = 60;
+        controls.maxDistance = 450;
+        controls.update();
+
+        window.addEventListener('resize', onWindowResize, false);
+
+        //For performance reasons, we can limit mobile to 30FPS if necessary.
+        //Allows for smother user experience on some older devices.
+        if (limitMobileFPS && IS_MOBILE) {
+            clock = new THREE.Clock();
+            animateMobile();
         }
+        else
+            animate();
+    }
 
-        //_____Load object________
-        var onProgress = function (xhr) { };
-        var onError = function (xhr) { reject(xhr) };
-        var surfaceList = [];
+    function onWindowResize() {
+        container = document.getElementById('viewer');
+        camera.aspect = (container.clientWidth) / (container.clientHeight);
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        render();
+    }
 
-        var loader = new THREE.OBJLoader(manager);
-        loader.load(uri, function (object) {
-            object.name = 'group_root';
-            group_root = object;
+    function animate() {
+        requestAnimationFrame(animate);
+        render();
+    }
 
-            //De-group geometries into separate meshes, if necessary.
-            object.traverse(function (child) {
-                if (child instanceof THREE.Mesh) {
+    function animateMobile() {
+        requestAnimationFrame(animateMobile);
+        delta += clock.getDelta();
 
-                    if (child.geometry.groups.length > 0) {
+        if (delta > interval) {
+            render();
+            delta = delta % interval;
+        }
+    }
 
-                        child.geometry.groups.forEach((group, index) => {
+    function render() {
+        camera.lookAt(scene.position);
+        renderer.render(scene, camera);
+    }
 
-                            var startIndex = group.start;
-                            var count = group.count;
+    /** Clears the 3D scene and deletes reference data. */
+    function resetScene() {
+        scene.remove(group_root);
 
-                            var position = new Float32Array(count * 3);
-                            var normal = new Float32Array(count * 3);
-                            var uv = new Float32Array(count * 2);
+        curr_surfaces.forEach(surface => surface.dispose());
+        og_surfaces.forEach(surface => surface.dispose());
+        surfaces.forEach(surface => surface.geometry.dispose());
+        models.forEach(surface => surface.geometry.dispose());
 
-                            for (var i = 0; i < count * 3; i++)
-                                position[i] = child.geometry.getAttribute("position").array[(startIndex * 3) + i];
+        curr_surfaces = [];
+        og_surfaces = [];
+        surfaces = [];
+        models = [];
 
-                            for (var i = 0; i < count * 3; i++)
-                                normal[i] = child.geometry.getAttribute("normal").array[(startIndex * 3) + i];
+        models_map = {};
+        surfaces_map = {};
 
-                            for (var i = 0; i < count * 2; i++)
-                                uv[i] = child.geometry.getAttribute("uv").array[(startIndex * 2) + i];
+        colorMaterial.dispose();
+        colorMaterial = null;
+        wireMaterial.dispose();
+        wireMaterial = null;
+        textures.forEach(tex => tex && tex.dispose());
+        textures = [];
+        surfaceMaterials.forEach(mat => mat.dispose());
+        surfaceMaterials = [];
 
-                            var geometry = new THREE.BufferGeometry();
-                            geometry.addAttribute("position", new THREE.BufferAttribute(position, 3));
-                            geometry.addAttribute("normal", new THREE.BufferAttribute(normal, 3));
-                            geometry.addAttribute("uv", new THREE.BufferAttribute(uv, 2));
-                            var mat = child.material[group.materialIndex];
-                            var mesh = new THREE.Mesh(geometry, mat);
-                            mesh.name = "Surface: " + child.name + "" + index;
+        imageURLs = [];
+        modelURL = "";
+        jsonURL = "";
 
-                            object.add(mesh);
-                        });
+        modelType = "";
+        modelFormat = "";
 
+        curr_surface_borders = [];
+        og_surface_borders = [];
+
+        surfaceAspectRatios = [];
+
+        lodState = [];
+        scaleState = [];
+        surfaceState = [];
+        positionState = [];
+        referenceImages = [];
+        refType = [];
+
+        group_root = null;
+    }
+
+
+    /*** API METHODS ***/
+
+    /**
+     * Loads a new model into the scene, overwriting the current one if it exists.
+     * @param {string} uri The url of the model file.
+     * @param {string} type The origin type of the model. Available types in [MODELTYPES] constants.
+     * @param {string} color The initial solid color value in hexadecimal.
+     * @returns {Array} A list with information about the customizable surfaces added to the scene.
+     */
+    function loadModel(uri, format, type = MODELTYPES.UPLOAD, color = '#F4F4F4') {
+
+        return new Promise((resolve, reject) => {
+
+            if (group_root) {
+                //Reset model data and scene, memory management
+                resetScene();
+            }
+
+            //Intended returned data with surface details. Used for interface initialization.
+            var surfaceList = [];
+
+            //Select apropriate loader.
+            var loader = null;
+            switch (format.toLowerCase()) {
+                case "obj": loader = new THREE.OBJLoader(manager); break;
+                case "glb": loader = new THREE.GLTFLoader(manager); break;
+                default: loader = null; break;
+            }
+            if (loader === null) { reject(new Error("Unsupported file format.")); return; }
+
+            var onProgress = function (xhr) { };
+            var onError = function (error) { reject(error) };
+
+            //Main 3D object/scene loading block
+            loader.load(uri, function (object) {
+
+                if (format === "glb") object = object.scene;
+
+                object.name = 'group_root';
+                group_root = object;
+
+                //De-group geometries into separate meshes, if necessary.
+                degroupMesh(object);
+
+                var xS = null, yS = null, zS = null;
+                var xL = null, yL = null, zL = null;
+                var surfaceCount = 0, modelCount = 0;
+
+                //Initialize model and state variables and find necessary factors.
+                object.traverse(function (child) {
+                    if (child instanceof THREE.Mesh) {
+
+                        var indexedGeometry = THREE.BufferGeometryUtils.mergeVertices(child.geometry);
                         child.geometry.dispose();
-                        object.remove(child);
-                    }
-                }
-            });
+                        child.geometry = indexedGeometry;
 
-            var xS = null, yS = null, zS = null;
-            var xL = null, yL = null, zL = null;
-            var surfaceCount = 0, modelCount = 0;
+                        //Find normalization factor components
+                        var amount = child.geometry.getAttribute('position').count;
+                        var vertices = child.geometry.getAttribute('position').array;
 
-            object.traverse(function (child) {
-                if (child instanceof THREE.Mesh) {
-
-                    if (child.geometry.index !== null)
-                        child.geometry.toNonIndexed();
-
-                    //Find normalization factor components
-                    var amount = child.geometry.getAttribute('position').count / 3;
-                    var vertices = child.geometry.getAttribute('position').array;
-
-                    if (xS == null) {
-                        xS = vertices[0]; yS = vertices[1]; zS = vertices[2];
-                        xL = vertices[0]; yL = vertices[1]; zL = vertices[2];
-                    }
-
-                    for (var i = 0; i < amount; i++) {
-
-                        var x = vertices[i * 3];
-                        var y = vertices[(i * 3) + 1];
-                        var z = vertices[(i * 3) + 2];
-
-                        //Determine smallest and largest vertex scalars
-                        xS = (xS > x) ? x : xS; xL = (xL < x) ? x : xL;
-                        yS = (yS > y) ? y : yS; yL = (yL < y) ? y : yL;
-                        zS = (zS > z) ? z : zS; zL = (zL < z) ? z : zL;
-                    }
-
-                    if (MODEL_ID.includes(child.name)) {
-                        //We deal with static model reference storage
-                        models.push(child);
-                        models_map[child.name] = modelCount;
-                        modelCount++;
-                    }
-                    else {
-
-                        var vertexNumber = child.geometry.getAttribute("position").count;
-
-                        for (var medAmount = 0; ; medAmount++) {
-                            if (vertexNumber * Math.pow(2, medAmount) >= MIN_MED_THRESHOLD)
-                                break;
+                        if (xS == null) {
+                            xS = vertices[0]; yS = vertices[1]; zS = vertices[2];
+                            xL = vertices[0]; yL = vertices[1]; zL = vertices[2];
                         }
 
-                        surfaces.push(child);
-                        surfaceList.push({ name: child.name, med: medAmount });
+                        for (var i = 0; i < amount; i++) {
 
-                        //Initialize texture material unique to each surface
-                        var placeholderSurfaceImage = placeholderImage(surfaceCount);
-                        var texture = textureLoader.load(placeholderSurfaceImage);
-                        texture.minFilter = THREE.LinearFilter;
+                            var x = vertices[i * 3];
+                            var y = vertices[(i * 3) + 1];
+                            var z = vertices[(i * 3) + 2];
 
-                        var material = new THREE.MeshBasicMaterial({
-                            map: texture
-                        });
+                            //Determine smallest and largest vertex scalars
+                            xS = (xS > x) ? x : xS; xL = (xL < x) ? x : xL;
+                            yS = (yS > y) ? y : yS; yL = (yL < y) ? y : yL;
+                            zS = (zS > z) ? z : zS; zL = (zL < z) ? z : zL;
+                        }
 
-                        surfaceMaterials.push(material);
+                        if (MODEL_ID.includes(child.name) || child.geometry.getAttribute("uv") === null) {
+                            //We deal with static model reference storage
+                            models.push(child);
+                            models_map[child.name] = modelCount;
+                            modelCount++;
+                        }
+                        else {
 
-                        //We deal with customizable surface reference storage
-                        textures.push(null);
-                        referenceImages.push(null);
+                            //Determine medium detail level based on desired threshold
+                            for (var medAmount = 0; ; medAmount++)
+                                if (amount * Math.pow(2, medAmount) >= MIN_MED_THRESHOLD)
+                                    break;
 
-                        surfaces_map[child.name] = surfaceCount;
+                            //We deal with customizable surface reference storage
+                            surfaces.push(child);
+                            surfaces_map[child.name] = surfaceCount;
+                            surfaceList.push({ name: child.name, med: medAmount });
 
-                        lodState.push(0);
-                        scaleState.push(0);
-                        surfaceState.push(true);
-                        refType.push(REF_TYPE.POSITIVE);
+                            //Initialize texture material unique to each surface
+                            var placeholderSurfaceImage = placeholderImage(surfaceCount);
+                            var texture = textureLoader.load(placeholderSurfaceImage);
+                            texture.minFilter = THREE.LinearFilter;
 
-                        surfaceCount++;
+                            var material = new THREE.MeshBasicMaterial({ map: texture });
+                            surfaceMaterials.push(material);
+                            textures.push(null);
+                            referenceImages.push(null);
+
+                            imageURLs.push("");
+
+                            lodState.push(0);
+                            scaleState.push(0);
+                            surfaceState.push(true);
+                            positionState.push([0, 0, 1, 1, 0]);
+                            refType.push(REF_TYPE.POSITIVE);
+
+                            curr_surface_borders.push({});
+                            og_surface_borders.push({});
+                            generateBorderTable(surfaceCount, child.geometry);
+
+                            surfaceAspectRatios.push({ w: 1, h: 1 });
+                            calculateSurfaceAspectRatio(surfaceCount, child.geometry);
+
+                            surfaceCount++;
+                        }
                     }
-                }
-            });
+                });
 
+                var xM = Math.abs(xL) - ((xS + xL) / 2);
+                var yM = Math.abs(yL) - ((yS + yL) / 2);
+                var zM = Math.abs(zL) - ((zS + zL) / 2);
+                var distM = Math.sqrt(Math.pow(xM, 2) + Math.pow(yM, 2) + Math.pow(zM, 2));
 
-            //Normalization and scale factors
-            var xM = (Math.max(Math.abs(xL), Math.abs(xS)) - ((xS + xL) / 2));
-            var yM = (Math.max(Math.abs(yL), Math.abs(yS)) - ((yS + yL) / 2));
-            var zM = (Math.max(Math.abs(zL), Math.abs(zS)) - ((zS + zL) / 2));
+                var xm = Math.abs(xS) - ((xS + xL) / 2);
+                var ym = Math.abs(yS) - ((yS + yL) / 2);
+                var zm = Math.abs(zS) - ((zS + zL) / 2);
+                var distm = Math.sqrt(Math.pow(xm, 2) + Math.pow(ym, 2) + Math.pow(zm, 2));
 
-            scaleFactor = 1 / Math.sqrt(Math.pow(xM, 2) + Math.pow(yM, 2) + Math.pow(zM, 2));
-            translateFactor = { x: (xS + xL) / 2, y: (yS + yL) / 2, z: (zS + zL) / 2 };
+                //Normalization and scale factors
+                scaleFactor = 1 / Math.max(distm, distM);
+                translateFactor = { x: (xS + xL) / 2, y: (yS + yL) / 2, z: (zS + zL) / 2 };
 
-            //Shared Materials
-            colorMaterial = new THREE.MeshPhongMaterial({
-                bumpScale: 1,
-                color: color,
-                specular: new THREE.Color(0.1 * 0.2, 0.1 * 0.2, 0.1 * 0.2),
-                reflectivity: 0.1,
-                shininess: 30
-            });
-            wireMaterial = new THREE.MeshBasicMaterial({
-                color: color,
-                wireframe: true
-            });
+                currentColor = color;
 
-            object.traverse(function (child) {
-                if (child instanceof THREE.Mesh) {
+                //Shared Materials
+                colorMaterial = new THREE.MeshPhongMaterial({
+                    bumpScale: 1,
+                    color: color,
+                    specular: new THREE.Color(0.1 * 0.2, 0.1 * 0.2, 0.1 * 0.2),
+                    reflectivity: 0.1,
+                    shininess: 30
+                });
+                wireMaterial = new THREE.MeshBasicMaterial({
+                    color: color,
+                    wireframe: true
+                });
 
-                    //Normalize models and scale to uniform default
-                    child.geometry.translate(-translateFactor.x, -translateFactor.y, -translateFactor.z);
-                    child.geometry.scale(scaleFactor, scaleFactor, scaleFactor);
-                    child.geometry.scale(SCALE_UNIFORM[0], SCALE_UNIFORM[1], SCALE_UNIFORM[2]);
+                object.traverse(function (child) {
+                    if (child instanceof THREE.Mesh) {
 
-                    child.geometry.normalizeNormals();
-                    child.geometry.computeBoundingBox();
+                        //Normalize models and scale to uniform default
+                        child.geometry.translate(-translateFactor.x, -translateFactor.y, -translateFactor.z);
+                        child.geometry.scale(scaleFactor, scaleFactor, scaleFactor);
+                        child.geometry.scale(SCALE_UNIFORM[0], SCALE_UNIFORM[1], SCALE_UNIFORM[2]);
 
-                    //Initialize materials
-                    child.material.dispose();
-                    child.material = colorMaterial;
+                        child.geometry.normalizeNormals();
+                        child.geometry.computeBoundingBox();
 
-                    if (!MODEL_ID.includes(child.name)) {
-                        og_surfaces.push(child.geometry.clone());
-                        curr_surfaces.push(child.geometry.clone());
+                        //Initialize materials
+                        child.material.dispose();
+                        child.material = colorMaterial;
+
+                        //We store and maintain two separate copies of the customizable surfaces. 
+                        //One is the currently used one for calculation purposes. 
+                        //The other is a fallback backup that safeguards the original morphology.
+                        if (!MODEL_ID.includes(child.name) && child.geometry.getAttribute("uv") !== null) {
+                            curr_surfaces.push(child.geometry);
+                            og_surfaces.push(child.geometry.clone());
+                        }
                     }
+                });
+
+                scene.add(group_root);
+
+                group_root.materialLibraries = null;
+
+                modelType = type;
+                modelFormat = format;
+                modelURL = uri;
+
+                resolve(surfaceList);
+
+            }, onProgress, onError);
+        })
+    }
+
+    function degroupMesh(object3D) {
+        //Degroup 3D object into separate meshes. 
+        //Certain meshes possess multiple material groups, by degrouping we can turn each into a separate editable surface.
+
+        object3D.traverse(function (child) {
+            if (child instanceof THREE.Mesh) {
+
+                if (child.geometry.groups.length > 0) {
+
+                    child.geometry.groups.forEach((group, index) => {
+
+                        var startIndex = group.start;
+                        var count = group.count;
+
+                        var position = new Float32Array(count * 3);
+                        var normal = new Float32Array(count * 3);
+                        var uv = new Float32Array(count * 2);
+
+                        for (var i = 0; i < count * 3; i++)
+                            position[i] = child.geometry.getAttribute("position").array[(startIndex * 3) + i];
+
+                        for (var i = 0; i < count * 3; i++)
+                            normal[i] = child.geometry.getAttribute("normal").array[(startIndex * 3) + i];
+
+                        for (var i = 0; i < count * 2; i++)
+                            uv[i] = child.geometry.getAttribute("uv").array[(startIndex * 2) + i];
+
+                        var geometry = new THREE.BufferGeometry();
+                        geometry.addAttribute("position", new THREE.BufferAttribute(position, 3));
+                        geometry.addAttribute("normal", new THREE.BufferAttribute(normal, 3));
+                        geometry.addAttribute("uv", new THREE.BufferAttribute(uv, 2));
+                        var mat = child.material[group.materialIndex];
+                        var mesh = new THREE.Mesh(geometry, mat);
+                        mesh.name = "Surface: " + child.name + "" + index;
+
+                        object3D.add(mesh);
+                    });
+
+                    child.geometry.dispose();
+                    object3D.remove(child);
                 }
-            });
-
-            scene.add(object);
-
-        }, onProgress, onError);
-
-        modelType = type;
-
-        resolve(surfaceList);
-    })
-}
-
-function colorize(color) {
-    return new Promise((resolve, reject) => {
-
-        if (group_root) {
-            //Change color for shared materials
-            colorMaterial.color.set(color.hex);
-            wireMaterial.color.set(color.hex);
-
-            colorMaterial.needsUpdate = true;
-            wireMaterial.needsUpdate = true;
-
-            resolve(1);
-        }
-        else
-            resolve(0);
-
-    })
-}
-
-function changeViewMode(mode) {
-    return new Promise((resolve, reject) => {
-
-        if (group_root && viewerMode !== mode.toLowerCase()) {
-
-            //Update material on static models
-            models.forEach(model => {
-                switch (mode) {
-                    case "wireframe":
-                        model.material = wireMaterial; break;
-                    default:
-                        model.material = colorMaterial; break;
-                }
-            });
-
-            //Update materials on dynamic surfaces
-            surfaces.forEach((surface, index) => {
-                switch (mode) {
-                    case "wireframe":
-                        surface.material = wireMaterial; break;
-                    case "texture":
-                        surface.material = surfaceMaterials[index];
-                        break;
-                    default:
-                        surface.material = colorMaterial; break;
-                }
-            });
-
-            viewerMode = mode.toLowerCase();
-        }
-        resolve(1);
-    })
-}
-
-function addReference(index, image, detailLevel, scale) {
-    return new Promise((resolve, reject) => {
-
-        var newTexture = textureLoader.load(image);
-        newTexture.minFilter = THREE.LinearFilter;
-        newTexture.needsUpdate = true;
-
-        if (textures[index]) {
-
-            //Get old definitions
-            var texture = textures[index];
-            var offset = texture.offset;
-            var repeat = texture.repeat;
-            var rotation = texture.rotation;
-            var wrapT = texture.wrapT;
-            var wrapS = texture.wrapS;
-            var flipY = texture.flipY;
-            var center = texture.center;
-
-            //Apply them to a new texture
-            newTexture.offset = offset;
-            newTexture.repeat = repeat;
-            newTexture.rotation = rotation;
-            newTexture.wrapT = wrapT;
-            newTexture.wrapS = wrapS;
-            newTexture.flipY = flipY;
-            newTexture.center = center;
-
-            texture.dispose();
-        }
-
-        textures[index] = newTexture;
-        surfaceMaterials[index].map = newTexture;
-        surfaceMaterials[index].needsUpdate = true;
-
-        //Process the image
-        processImage(image, index).then(result => {
-            //Apply initial deformation and apply image reference to mesh
-            updateSurface(index, detailLevel, scale);
+            }
         });
-        resolve(1);
-    })
-}
+    }
 
-function removeReference(index) {
-    return new Promise((resolve, reject) => {
+    function generateBorderTable(index, geometry) {
 
-        if (textures[index]) {
+        //We generate a map that fully represents all border edges.
+        //These are useful to detect border vertexes in order to prevent broken surface corners.
 
-            var texture = textures[index];
-            texture.dispose();
+        if (geometry.index === null || !curr_surface_borders[index] || !og_surface_borders[index])
+            return;
 
-            //Re-apply placeholder texture
-            var placeholderSurfaceImage = placeholderImage(index);
-            var newTexture = textureLoader.load(placeholderSurfaceImage);
-            newTexture.minFilter = THREE.LinearFilter;
+        var geometryEdges = new Map();
 
-            textures[index] = null;
-            surfaceMaterials[index].map = newTexture;
-            surfaceMaterials[index].needsUpdate = true;
+        var indexes = geometry.index;
+        for (var i = 0; i < indexes.count; i += 3) {
+            var v1_1 = Math.min(indexes.array[i], indexes.array[i + 1]);
+            var v2_1 = Math.max(indexes.array[i], indexes.array[i + 1]);
+            var edge1 = v1_1 + ":" + v2_1;
+            var v1_2 = Math.min(indexes.array[i + 1], indexes.array[i + 2]);
+            var v2_2 = Math.max(indexes.array[i + 1], indexes.array[i + 2]);
+            var edge2 = v1_2 + ":" + v2_2;
+            var v1_3 = Math.min(indexes.array[i], indexes.array[i + 2]);
+            var v2_3 = Math.max(indexes.array[i], indexes.array[i + 2]);
+            var edge3 = v1_3 + ":" + v2_3;
 
-            referenceImages[index] = null;
-            curr_surfaces[index].dispose();
-
-            if (surfaces[index].geometry) surfaces[index].geometry.dispose();
-            surfaces[index].geometry = og_surfaces[index].clone();
+            geometryEdges.set(edge1, { isEdge: (geometryEdges.has(edge1) ? false : true), vertexes: [v1_1, v2_1] });
+            geometryEdges.set(edge2, { isEdge: (geometryEdges.has(edge2) ? false : true), vertexes: [v1_2, v2_2] });
+            geometryEdges.set(edge3, { isEdge: (geometryEdges.has(edge3) ? false : true), vertexes: [v1_3, v2_3] });
         }
-        resolve(1);
-    })
-}
 
-function placeholderImage(index) {
-    return "../img/" + (index + 1) + ".png";
-}
+        var curr_table = new Map();
+        var og_table = new Map();
 
-function updateSurface(index, detailLevel, scale) {
-    return new Promise((resolve, reject) => {
+        geometryEdges.forEach(function (value, key, map) {
+            if (value.isEdge) {
+                if (!curr_table.has(value.vertexes[0]))
+                    curr_table.set(value.vertexes[0], [value.vertexes[1]]);
+                else
+                    curr_table.get(value.vertexes[0]).push(value.vertexes[1]);
 
-        if (lodState[index] != detailLevel && detailLevel > 0) {
+                if (!curr_table.has(value.vertexes[1]))
+                    curr_table.set(value.vertexes[1], [value.vertexes[0]]);
+                else
+                    curr_table.get(value.vertexes[1]).push(value.vertexes[0]);
 
-            //We subdivide the surface mesh
-            var geometry = (detailLevel - lodState[index]) < 0 ? og_surfaces[index].clone() : curr_surfaces[index];
+                if (!og_table.has(value.vertexes[0]))
+                    og_table.set(value.vertexes[0], [value.vertexes[1]]);
+                else
+                    og_table.get(value.vertexes[0]).push(value.vertexes[1]);
 
-            var divisions = (detailLevel - lodState[index]) < 0 ? detailLevel : (detailLevel - lodState[index]);
-            for (var i = 0; i < divisions; i++) {
-                bufferGeometryTesselate(geometry);
+                if (!og_table.has(value.vertexes[1]))
+                    og_table.set(value.vertexes[1], [value.vertexes[0]]);
+                else
+                    og_table.get(value.vertexes[1]).push(value.vertexes[0]);
             }
+        });
 
-            if (surfaces[index].geometry) surfaces[index].geometry.dispose();
+        og_surface_borders[index] = og_table;
+        curr_surface_borders[index] = curr_table;
+    }
 
-            surfaces[index].geometry = surfaceState[index] ? geometry : og_surfaces[index];
-            if ((detailLevel - lodState[index]) < 0) {
-                curr_surfaces[index].dispose();
-            }
-            curr_surfaces[index] = geometry.clone();
-            lodState[index] = detailLevel;
+    function calculateSurfaceAspectRatio(index, geometry) {
 
-            //If a reference exists, we apply it.
-            if (textures[index]) {
-                applyReference(index, scale, true);
-            }
+        //We approximate the aspect ration of the surface, combating image reference deformation.
 
-            resolve(1);
-        }
-        else if (textures[index] && surfaceState[index]) {
-            //The mesh doesn't need subdivision, we only apply the reference.
-            applyReference(index, scale);
-            resolve(2);
-        }
-        else
-            reject(-1);
-    })
-}
-
-function applyReference(index, scale, bypassCached = false) {
-
-    if (surfaceState[index]) {
-        var geometry;
-
-        if (!bypassCached) {
-            if (surfaces[index].geometry) surfaces[index].geometry.dispose();
-
-            geometry = curr_surfaces[index].clone();
-        }
-        else
-            geometry = surfaces[index].geometry;
-
-
-        var count = geometry.getAttribute("position").count;
-        var vertexs = geometry.getAttribute("position").array;
-        var normals = geometry.getAttribute("normal").array;
+        var border = curr_surface_borders[index];
+        var positions = geometry.getAttribute("position").array;
         var uvs = geometry.getAttribute("uv").array;
 
-        var vector = new THREE.Vector2(0, 0);
-        for (var i = 0; i < count; i++) {
-            var heightValue = lookupReferenceData(uvs[i * 2], uvs[(i * 2) + 1], index, vector);
-            var value = refType[index] == REF_TYPE.POSITIVE ? heightValue : 1 - heightValue;
+        var first = true;
 
-            vertexs[i * 3] += normals[i * 3] * value * scale;
-            vertexs[(i * 3) + 1] += normals[(i * 3) + 1] * value * scale;
-            vertexs[(i * 3) + 2] += normals[(i * 3) + 2] * value * scale;
+        var uv = { index: -1, u: 0, v: 0 };
+        var Uv = { index: -1, u: 0, v: 0 };
+        var uV = { index: -1, u: 0, v: 0 };
+        var UV = { index: -1, u: 0, v: 0 };
+
+        //Get "corner" vertexes
+        border.forEach(function (value, key, map) {
+
+            var u = uvs[key * 2];
+            var v = uvs[(key * 2) + 1];
+
+            if (first) {
+                uv.index = key; uv.u = u; uv.v = v;
+                Uv.index = key; Uv.u = u; Uv.v = v;
+                uV.index = key; uV.u = u; uV.v = v;
+                UV.index = key; UV.u = u; UV.v = v;
+
+                first = false;
+            }
+            else {
+                if (u <= uv.u && v <= uv.v) {
+                    uv.index = key; uv.u = u; uv.v = v;
+                }
+                if (u >= Uv.u && v <= Uv.v) {
+                    Uv.index = key; Uv.u = u; Uv.v = v;
+                }
+                if (u <= uV.u && v >= uV.v) {
+                    uV.index = key; uV.u = u; uV.v = v;
+                }
+                if (u >= UV.u && v >= UV.v) {
+                    UV.index = key; UV.u = u; UV.v = v;
+                }
+            }
+        });
+
+        var wTotal = 0;
+        var hTotal = 0;
+
+        var width1 = Math.sqrt(Math.pow(positions[(uv.index * 3)] - positions[(Uv.index * 3)], 2) +
+            Math.pow(positions[(uv.index * 3) + 1] - positions[(Uv.index * 3) + 1], 2) +
+            Math.pow(positions[(uv.index * 3) + 2] - positions[(Uv.index * 3) + 2], 2));
+
+        var width2 = Math.sqrt(Math.pow(positions[(uV.index * 3)] - positions[(UV.index * 3)], 2) +
+            Math.pow(positions[(uV.index * 3) + 1] - positions[(UV.index * 3) + 1], 2) +
+            Math.pow(positions[(uV.index * 3) + 2] - positions[(UV.index * 3) + 2], 2));
+
+        wTotal = Math.max(width1, width2);
+
+        var height1 = Math.sqrt(Math.pow(positions[(uv.index * 3)] - positions[(uV.index * 3)], 2) +
+            Math.pow(positions[(uv.index * 3) + 1] - positions[(uV.index * 3) + 1], 2) +
+            Math.pow(positions[(uv.index * 3) + 2] - positions[(uV.index * 3) + 2], 2));
+
+        var height2 = Math.sqrt(Math.pow(positions[(Uv.index * 3)] - positions[(UV.index * 3)], 2) +
+            Math.pow(positions[(Uv.index * 3) + 1] - positions[(UV.index * 3) + 1], 2) +
+            Math.pow(positions[(Uv.index * 3) + 2] - positions[(UV.index * 3) + 2], 2));
+
+        hTotal = Math.max(height1, height2);
+
+        if (wTotal < hTotal) {
+            surfaceAspectRatios[index].w = 1;
+            surfaceAspectRatios[index].h = wTotal / hTotal;
         }
-        vertexs.needsUpdate = true;
-        geometry.computeVertexNormals();
-
-        surfaces[index].geometry = geometry;
-        scaleState[index] = scale;
-    }
-}
-
-function lookupReferenceData(u, v, index, vec) {
-    vec.set(u, v);
-    var uv = textures[index].transformUv(vec);
-    var width = referenceImages[index].width;
-    var height = referenceImages[index].height;
-
-    var ux = uv.x < 0 ? 0 : (uv.x > 1 ? 1 : uv.x);
-    var vx = uv.y < 0 ? 0 : (uv.y > 1 ? 1 : uv.y);
-
-    var tx = Math.min(Math.round(ux * width), width - 1);
-    var ty = Math.min(Math.round(vx * height), height - 1);
-    var offset = (ty * width + tx);
-
-    var value = referenceImages[index].data[offset];
-
-    //If the UVs belong to the edges of UV/image range, return scale value 0 to prevent broken borders.
-    //Ideally we'd have a means to calculate which vertexes belong to the border, but that'd be far too computationally heavy for real time manipulation?
-    if ((u <= 0 || u >= 1 || v <= 0 || v >= 1) || (tx <= 0 || tx >= width - 1 || ty <= 0 || ty >= height - 1)) {
-        value = refType[index] == REF_TYPE.POSITIVE ? 0 : 1;
+        else if (wTotal > hTotal) {
+            surfaceAspectRatios[index].w = hTotal / wTotal;
+            surfaceAspectRatios[index].h = 1;
+        }
     }
 
-    return value;
-}
+    /**
+     * Add a new reference (image) to the indexed surface. This reference is used to customize the surface via tesselation and extrusion.
+     * @param {string} index The index of the surface.
+     * @param {string} image The reference image path/URL.
+     * @param {int} detailLevel The level of detail/subdivisions to control tesselation.
+     * @param {float} scale The scale of the extrusion process.
+     */
+    function addReference(index, image, detailLevel, scale) {
+        return new Promise((resolve, reject) => {
 
-function processImage(image, index) {
-    return new Promise((resolve, reject) => {
-        imageLoader.load(image,
-            target => {
+            var onProgress = function (xhr) { };
+            var onError = function (error) { reject(error.message) };
+
+            textureLoader.load(image,
+                function (newTexture) {
+                    newTexture.minFilter = THREE.LinearFilter;
+
+                    if (textures[index]) {
+
+                        //Get old definitions
+                        var texture = textures[index];
+                        var offset = texture.offset;
+                        var repeat = texture.repeat;
+                        var rotation = texture.rotation;
+                        var wrapT = texture.wrapT;
+                        var wrapS = texture.wrapS;
+                        var flipY = texture.flipY;
+                        var center = texture.center;
+
+                        //Apply them to a new texture
+                        newTexture.offset = offset;
+                        newTexture.repeat = repeat;
+                        newTexture.rotation = rotation;
+                        newTexture.wrapT = wrapT;
+                        newTexture.wrapS = wrapS;
+                        newTexture.flipY = flipY;
+                        newTexture.center = center;
+
+                        //Maintain correct default aspect ratio for image
+                        newTexture.repeat.x = newTexture.repeat.x * referenceImages[index].aspectRatioW * surfaceAspectRatios[index].w;
+                        newTexture.repeat.y = newTexture.repeat.y * referenceImages[index].aspectRatioH * surfaceAspectRatios[index].h;
+
+                        texture.dispose();
+                    }
+
+                    textures[index] = newTexture;
+                    surfaceMaterials[index].map = newTexture;
+                    surfaceMaterials[index].needsUpdate = true;
+
+                    imageURLs[index] = image;
+
+                    //Process the image
+                    processImage(image, index).then(result => {
+                        //Apply initial deformation and apply image reference to mesh
+                        updateSurface(index, detailLevel, scale).then(result => {
+                            changeReferencePosition(index, newTexture.offset.x, newTexture.offset.y, newTexture.repeat.x, newTexture.repeat.y, newTexture.rotation, scale);
+                            resolve(result);
+                        });
+                    }).catch(err => { reject(err) });
+
+                }, onProgress, onError);
+        });
+    }
+
+    /**
+     * Removes a reference (image) from the indexed surface.
+     * @param {string} index The index of the surface.
+     */
+    function removeReference(index) {
+        return new Promise((resolve, reject) => {
+
+            if (textures[index]) {
+
+                var texture = textures[index];
+                texture.dispose();
+
+                //Re-apply placeholder texture
+                var placeholderSurfaceImage = placeholderImage(index);
+                var newTexture = textureLoader.load(placeholderSurfaceImage);
+                newTexture.minFilter = THREE.LinearFilter;
+
+                textures[index] = null;
+                surfaceMaterials[index].map = newTexture;
+                surfaceMaterials[index].needsUpdate = true;
+
+                referenceImages[index] = null;
+                curr_surfaces[index].dispose();
+
+                curr_surface_borders[index] = new Map(og_surface_borders[index]);
+
+                if (surfaces[index].geometry) surfaces[index].geometry.dispose();
+                surfaces[index].geometry = og_surfaces[index].clone();
+            }
+            resolve(true);
+        })
+    }
+
+    /**
+     * Returns a placeholder texture image.
+     * @param {string} index The index/numbering of the texture.
+     */
+    function placeholderImage(index) {
+        var index = PLACEHOLDER_MAX_INDEX < index + 1 ? PLACEHOLDER_MAX_INDEX : index;
+        return PLACEHOLDER_BASE_PATH + (index + 1) + ".png";
+    }
+
+    /**
+     * Updates the indexed surface, tesselating it and initiating the extrusion process using the current reference data.
+     * @param {string} index The index of the surface.
+     * @param {int} detailLevel The level of detail/subdivisions to control tesselation.
+     * @param {float} scale The scale of the extrusion process.
+     */
+    function updateSurface(index, detailLevel, scale) {
+        return new Promise((resolve, reject) => {
+
+            if (!group_root)
+                reject(new Error("No model is available."));
+
+            if (lodState[index] != detailLevel && detailLevel > 0) {
+
+                //We select the correct surface mesh, depending on level of division
+                var geometry = (detailLevel - lodState[index]) < 0 ? og_surfaces[index].clone() : curr_surfaces[index];
+
+                //Reset border vertex/edge table if necessary
+                if ((detailLevel - lodState[index]) < 0)
+                    curr_surface_borders[index] = new Map(og_surface_borders[index]);
+
+                //We tesselate the mesh the necessary amount of times to match resolution/detail level
+                var divisions = (detailLevel - lodState[index]) < 0 ? detailLevel : (detailLevel - lodState[index]);
+                for (var i = 0; i < divisions; i++)
+                    indexedBufferGeometryTesselate(geometry, index);
+
+                //Data management
+                if (surfaces[index].geometry) surfaces[index].geometry.dispose();
+
+                surfaces[index].geometry = surfaceState[index] ? geometry : og_surfaces[index];
+                if ((detailLevel - lodState[index]) < 0)
+                    curr_surfaces[index].dispose();
+
+                curr_surfaces[index] = geometry.clone();
+                lodState[index] = detailLevel;
+
+                //If a reference exists, we apply it.
+                if (textures[index])
+                    applyReference(index, scale, true);
+            }
+            else if (textures[index] && surfaceState[index]) {
+                //The mesh doesn't need subdivision, we only apply the reference.
+                applyReference(index, scale);
+            }
+            resolve(true);
+        });
+    }
+
+    /**
+     * Apply the current reference (image) to the indexed surface. This extrudes the surface to deform it into the shape of the image's height data.
+     * @param {string} index The index of the surface.
+     * @param {float} scale The scale of the extrusion process.
+     * @param {boolean} bypassCached If true, forcefully use the current surface geometry on scene.
+     */
+    function applyReference(index, scale, bypassCached = false) {
+
+        if (surfaces[index] && curr_surfaces[index] && surfaceState[index] && refType[index]) {
+            var geometry;
+
+            if (!bypassCached) {
+                if (surfaces[index].geometry) surfaces[index].geometry.dispose();
+                geometry = curr_surfaces[index].clone();
+            }
+            else
+                geometry = surfaces[index].geometry;
+
+            var count = geometry.getAttribute("position").count;
+            var vertexs = geometry.getAttribute("position").array;
+            var normals = geometry.getAttribute("normal").array;
+            var uvs = geometry.getAttribute("uv").array;
+
+            var vector = new THREE.Vector2(0, 0);
+            for (var i = 0; i < count; i++) {
+                var heightValue = lookupReferenceData(uvs[i * 2], uvs[(i * 2) + 1], i, index, vector);
+                var value = refType[index] == REF_TYPE.POSITIVE ? heightValue : 1 - heightValue;
+
+                vertexs[i * 3] += normals[i * 3] * value * scale;
+                vertexs[(i * 3) + 1] += normals[(i * 3) + 1] * value * scale;
+                vertexs[(i * 3) + 2] += normals[(i * 3) + 2] * value * scale;
+            }
+            vertexs.needsUpdate = true;
+            geometry.computeVertexNormals();
+
+            surfaces[index].geometry = geometry;
+            scaleState[index] = scale;
+
+            return true;
+        }
+        else false;
+    }
+
+    function lookupReferenceData(u, v, vertexIndex, index, vec) {
+        vec.set(u, v);
+        var uv = textures[index].transformUv(vec);
+        var width = referenceImages[index].width;
+        var height = referenceImages[index].height;
+
+        var ux = uv.x < 0 ? 0 : (uv.x > 1 ? 1 : uv.x);
+        var vx = uv.y < 0 ? 0 : (uv.y > 1 ? 1 : uv.y);
+
+        var tx = Math.min(Math.round(ux * width), width - 1);
+        var ty = Math.min(Math.round(vx * height), height - 1);
+        var offset = (ty * width + tx);
+
+        var value = referenceImages[index].data[offset];
+
+        //If the UVs belong to the edges of UV/image range or border of surface, return scale value 0 to prevent broken borders.
+        if ((ux <= 0 || ux >= 1 || vx <= 0 || vx >= 1) || curr_surface_borders[index].has(vertexIndex)) {
+            value = refType[index] == REF_TYPE.POSITIVE ? 0 : 1;
+        }
+        return value;
+    }
+
+    /**
+     * Process reference image to extract height data and necessary reference data.
+     * @param {string} image The reference image path/URL.
+     * @param {string} index The index of the surface.
+     */
+    function processImage(image, index) {
+        return new Promise((resolve, reject) => {
+
+            var onProgress = function (xhr) { };
+            var onError = function (error) { reject(error.message) };
+
+            imageLoader.load(image, target => {
 
                 var imgWidth = target.naturalWidth;
                 var imgHeight = target.naturalHeight;
@@ -616,47 +881,114 @@ function processImage(image, index) {
                     for (var x = 0; x < cWidth; x++) {
                         pixel_offset = (y * 4) * cWidth + x * 4;
 
-                        // create negative monochrome value from red, green and blue values
+                        // Create negative monochrome value from red, green and blue values
                         var lum = 0.299 * data[pixel_offset] + 0.587 * data[pixel_offset + 1] + 0.114 * data[pixel_offset + 2];
 
                         heightData[height_pixel_index++] = (lum / 255);
                     }
                 }
 
-                imageLoadCanvas.getContext('2d').putImageData(imgData, 0, 0, 0, 0, cWidth, cHeight);
-                referenceImages[index] = { width: cWidth, height: cHeight, data: heightData };
+                //Calculate texture default aspect ratio
+                var wRatio = 1;
+                var hRatio = 1;
 
-                resolve(1);
-            }
-        );
-    });
-}
+                if (imgWidth > imgHeight)
+                    hRatio = imgHeight / imgWidth;
+                else
+                    wRatio = imgWidth / imgHeight;
 
-function changeReferenceState(index, state, scale) {
-    return new Promise((resolve, reject) => {
+                //Store the reference
+                referenceImages[index] = { width: cWidth, height: cHeight, aspectRatioW: wRatio, aspectRatioH: hRatio, data: heightData };
+
+                resolve(true);
+            },
+                onProgress, onError);
+        });
+    }
+
+
+    /* OPTION FUNCTIONS  */
+
+    /**
+     * Changes the solid color of the model.
+     * @param {string} color The solid color value in hexadecimal.
+     */
+    function colorize(color) {
+        if (group_root) {
+
+            //Change color for shared materials
+            colorMaterial.color.set(color);
+            wireMaterial.color.set(color);
+
+            colorMaterial.needsUpdate = true;
+            wireMaterial.needsUpdate = true;
+
+            currentColor = color;
+
+            return true;
+        }
+        else return false;
+    }
+
+    /**
+     * Changes the viewer mode for the scene. Eg. change model material to wireframe or solid color.
+     * @param {string} mode The viewer mode to change into. Available ones in [VIEWMODES].
+     */
+    function changeViewMode(mode) {
+        if (group_root) {
+
+            //Update material on static models
+            models.forEach(model => {
+                switch (mode.toLowerCase()) {
+                    case VIEWMODES.WIREFRAME:
+                        model.material = wireMaterial; break;
+                    default:
+                        model.material = colorMaterial; break;
+                }
+            });
+            //Update materials on dynamic surfaces
+            surfaces.forEach((surface, index) => {
+                switch (mode.toLowerCase()) {
+                    case VIEWMODES.WIREFRAME:
+                        surface.material = wireMaterial; break;
+                    case VIEWMODES.TEXTURE:
+                        surface.material = surfaceMaterials[index]; break;
+                    default:
+                        surface.material = colorMaterial; break;
+                }
+            });
+            viewerMode = mode.toLowerCase();
+            return true;
+        }
+        else return false;
+    }
+
+    /**
+     * Change reference use state.
+     * @param {int} index The index of the surface.
+     * @param {boolean} state If true, reference is used. Otherwise, it is ignored in the scene.
+     * @param {float} scale The scale of the extrusion process.
+     */
+    function changeReferenceState(index, state, scale) {
         if (!state && surfaceState[index] != state) {
-
             if (surfaces[index].geometry) surfaces[index].geometry.dispose();
             surfaces[index].geometry = og_surfaces[index].clone();
             surfaceState[index] = false;
-
         }
         else if (state && surfaceState[index] != state) {
-
             surfaceState[index] = true;
             applyReference(index, scale);
-
         }
-        resolve(1);
-    });
-}
+        return true;
+    }
 
-/**
- * @param {int} index The index of the surface.
- * @param {string} type The type of the reference, from those within "REF_TYPE": [positive] or [negative].
- */
-function changeReferenceType(index, type, scale) {
-    return new Promise((resolve, reject) => {
+    /**
+     * Change the type of reference for height data calculation.
+     * @param {int} index The index of the surface.
+     * @param {string} type The type of the reference, from those within "REF_TYPE": [positive] or [negative]. Positive uses lower intesity levels as lower height values, while Negative does the oposite.
+     * @param {float} scale The scale of the extrusion process.
+     */
+    function changeReferenceType(index, type, scale) {
         switch (type.toLowerCase()) {
             case "positive":
                 refType[index] = REF_TYPE.POSITIVE;
@@ -668,14 +1000,21 @@ function changeReferenceType(index, type, scale) {
                 refType[index] = REF_TYPE.POSITIVE;
                 break;
         }
-
         applyReference(index, scale);
-        resolve(1);
-    });
-}
+        return true;
+    }
 
-function changeReferencePosition(index, tx, ty, sx, sy, rotation, scale) {
-    return new Promise((resolve, reject) => {
+    /**
+     * Change the position/scale/rotation of reference for UV calculation and extrusion.
+     * @param {int} index The index of the surface.
+     * @param {float} tx Translation on the X texture axis.
+     * @param {float} ty Translation on the Y texture axis.
+     * @param {float} sx Scaling on the X texture axis.
+     * @param {float} sy Scaling on the Y texture axis.
+     * @param {float} rotation Reference/Texture rotation in radians.
+     * @param {float} scale The scale of the extrusion process.
+     */
+    function changeReferencePosition(index, tx, ty, sx, sy, rotation, scale) {
 
         var texture = textures[index];
 
@@ -683,453 +1022,924 @@ function changeReferencePosition(index, tx, ty, sx, sy, rotation, scale) {
         surfaces[index].material = surfaceMaterials[index];
         surfaceMaterials[index].needsUpdate = true;
 
-        texture.center.set(0.5, 0.5);
-        texture.offset.set(-tx / 100, -ty / 100);
-        texture.repeat.set(sx / 100, sy / 100);
+        var centerx = 0.5;
+        var centery = 0.5;
+
+        //Rotate translated offset to match new frame of reference
+        var py = (Math.cos(rotation) * (-ty)) - (Math.sin(rotation) * (-tx));
+        var px = (Math.sin(rotation) * (-ty)) + (Math.cos(rotation) * (-tx));
+
+        texture.center.set(centerx, centery);
+        texture.offset.set(px, py);
+        texture.repeat.set(sx / referenceImages[index].aspectRatioW / surfaceAspectRatios[index].w,
+            sy / referenceImages[index].aspectRatioH / surfaceAspectRatios[index].h);
         texture.rotation = rotation;
         texture.needsUpdate = true;
+
+        //Keep state for ease of access of interface derived values.
+        positionState[index][0] = tx;
+        positionState[index][1] = ty;
+        positionState[index][2] = sx;
+        positionState[index][3] = sy;
+        positionState[index][4] = rotation;
 
         render();
         surfaces[index].material = mat;
         applyReference(index, scale);
-    });
-}
 
-function downloadOBJ(xF = 1, yF = 1, zF = 1, change) {
-    if (group_root) {
-        if (change) {
-            var sceneClone = group_root.clone();
-
-            sceneClone.traverse(function (child) {
-                if (child instanceof THREE.Mesh) {
-
-                    //Return to normal scale and position.
-                    child.geometry.scale(1 / scaleFactor, 1 / scaleFactor, 1 / scaleFactor);
-                    child.geometry.scale(1 / SCALE_UNIFORM[0], 1 / SCALE_UNIFORM[1], 1 / SCALE_UNIFORM[2]);
-                    child.geometry.scale(xF, yF, zF);
-                    child.geometry.translate(translateFactor.x, translateFactor.y, translateFactor.z);
-
-                    child.geometry.computeBoundingBox();
-                }
-            });
-
-            var exporter = new THREE.OBJExporter();
-            var result = exporter.parse(sceneClone);
-
-            sceneClone.traverse(function (child) {
-                if (child instanceof THREE.Mesh) {
-                    child.geometry.dispose();
-                }
-            });
-        }
-        else {
-            var exporter = new THREE.OBJExporter();
-            var result = exporter.parse(group_root);
-        }
-
-        var blob = new Blob([result], { type: 'application/octet-stream' });
-        saveAs(blob, "model" + '.obj');
         return true;
     }
-    else
-        return false;
-}
 
 
+    /* TESSELATION UTILS */
 
+    function indexedBufferGeometryTesselate(geometry, index) {
 
+        //We tesselate the geometry once, dividing each face.
 
-/* UTILS */
+        var positions = geometry.getAttribute("position");
+        var normals = geometry.getAttribute("normal");
+        var uvs = geometry.getAttribute("uv");
+        var indexes = geometry.index.array;
 
-function bufferGeometryTesselate(geometry) {
+        var newPositionArray = Array.from(positions.array);
+        var newNormalArray = Array.from(normals.array);
+        var newUVArray = Array.from(uvs.array);
 
-    var positions = geometry.getAttribute("position");
-    var normals = geometry.getAttribute("normal");
-    var uvs = geometry.getAttribute("uv");
+        var totalIndexCount = geometry.index.count;
 
-    var newPositionArray = new Float32Array(positions.array.length * 2);
-    var newNormalArray = new Float32Array(normals.array.length * 2);
-    var newUVArray = new Float32Array(uvs.array.length * 2);
+        var newIndexArray = [];
 
-    var count = positions.count;
-
-    var vertex1 = [0, 0, 0];
-    var vertex2 = [0, 0, 0];
-    var vertex3 = [0, 0, 0];
-
-    var normal1 = [0, 0, 0];
-    var normal2 = [0, 0, 0];
-    var normal3 = [0, 0, 0];
-
-    var uv1 = [0, 0];
-    var uv2 = [0, 0];
-    var uv3 = [0, 0];
-
-    for (var count3 = 0; count3 < count; count3 += 3) {
-
-        vertex1[0] = positions.array[(count3 * 3)];
-        vertex1[1] = positions.array[(count3 * 3) + 1];
-        vertex1[2] = positions.array[(count3 * 3) + 2];
-        vertex2[0] = positions.array[(count3 * 3) + 3];
-        vertex2[1] = positions.array[(count3 * 3) + 4];
-        vertex2[2] = positions.array[(count3 * 3) + 5];
-        vertex3[0] = positions.array[(count3 * 3) + 6];
-        vertex3[1] = positions.array[(count3 * 3) + 7];
-        vertex3[2] = positions.array[(count3 * 3) + 8];
-
-        normal1[0] = normals.array[(count3 * 3)];
-        normal1[1] = normals.array[(count3 * 3) + 1];
-        normal1[2] = normals.array[(count3 * 3) + 2];
-        normal2[0] = normals.array[(count3 * 3) + 3];
-        normal2[1] = normals.array[(count3 * 3) + 4];
-        normal2[2] = normals.array[(count3 * 3) + 5];
-        normal3[0] = normals.array[(count3 * 3) + 6];
-        normal3[1] = normals.array[(count3 * 3) + 7];
-        normal3[2] = normals.array[(count3 * 3) + 8];
-
-        uv1[0] = uvs.array[(count3 * 2)];
-        uv1[1] = uvs.array[(count3 * 2) + 1];
-        uv2[0] = uvs.array[(count3 * 2) + 2];
-        uv2[1] = uvs.array[(count3 * 2) + 3];
-        uv3[0] = uvs.array[(count3 * 2) + 4];
-        uv3[1] = uvs.array[(count3 * 2) + 5];
-
-        //Detect largest edge to divide
-        var dist1 = Math.sqrt(Math.pow((vertex2[0] - vertex1[0]), 2) + Math.pow((vertex2[1] - vertex1[1]), 2) + Math.pow((vertex2[2] - vertex1[2]), 2));
-        var dist2 = Math.sqrt(Math.pow((vertex3[0] - vertex2[0]), 2) + Math.pow((vertex3[1] - vertex2[1]), 2) + Math.pow((vertex3[2] - vertex2[2]), 2));
-        var dist3 = Math.sqrt(Math.pow((vertex3[0] - vertex1[0]), 2) + Math.pow((vertex3[1] - vertex1[1]), 2) + Math.pow((vertex3[2] - vertex1[2]), 2));
-
-        var maxDist = Math.max(dist1, dist2, dist3);
-
-        //Create 2 new subdivided faces, splitting the largest edge.
-        if (maxDist == dist1) {
-            //Vertex 1
-            addVertex(vertex1, normal1, uv1, count3, 0, 0, newPositionArray, newNormalArray, newUVArray);
-
-            //New vertex
-            addNewVertex(vertex1, normal1, uv1, vertex2, normal2, uv2, count3, 3, 2, newPositionArray, newNormalArray, newUVArray);
-
-            //Vertex 3
-            addVertex(vertex3, normal3, uv3, count3, 6, 4, newPositionArray, newNormalArray, newUVArray);
-
-            //Vertex 2
-            addVertex(vertex2, normal2, uv2, count3, 9, 6, newPositionArray, newNormalArray, newUVArray);
-
-            //Vertex 3
-            addVertex(vertex3, normal3, uv3, count3, 12, 8, newPositionArray, newNormalArray, newUVArray);
-
-            //New vertex
-            addNewVertex(vertex1, normal1, uv1, vertex2, normal2, uv2, count3, 15, 10, newPositionArray, newNormalArray, newUVArray);
+        if (positions.count + (totalIndexCount / 3) <= Math.pow(2, 8)) {
+            newIndexArray = new Uint8Array(indexes.length * 2);
         }
-        else if (maxDist == dist2) {
-            //Vertex 1
-            addVertex(vertex1, normal1, uv1, count3, 0, 0, newPositionArray, newNormalArray, newUVArray);
+        else if (positions.count + (totalIndexCount / 3) <= Math.pow(2, 16)) {
+            newIndexArray = new Uint16Array(indexes.length * 2);
+        }
+        else if (positions.count + (totalIndexCount / 3) <= Math.pow(2, 32)) {
+            newIndexArray = new Uint32Array(indexes.length * 2);
+        }
+        else newIndexArray = new BigUint64Array(indexes.length * 2);
 
-            //Vertex 2
-            addVertex(vertex2, normal2, uv2, count3, 3, 2, newPositionArray, newNormalArray, newUVArray);
+        var mapPositions = new Map();
 
-            //New vertex
-            addNewVertex(vertex2, normal2, uv2, vertex3, normal3, uv3, count3, 6, 4, newPositionArray, newNormalArray, newUVArray);
+        for (var i = 0, vertexIdx = 0; i < positions.array.length; i += 3, vertexIdx++) {
+            mapPositions.set("" + positions.array[i] + ":" + positions.array[i + 1] + ":" + positions.array[i + 2], vertexIdx);
+        }
 
-            //Vertex 1
-            addVertex(vertex1, normal1, uv1, count3, 9, 6, newPositionArray, newNormalArray, newUVArray);
+        var vertex1 = [0, 0, 0]; var vertex2 = [0, 0, 0]; var vertex3 = [0, 0, 0];
+        var normal1 = [0, 0, 0]; var normal2 = [0, 0, 0]; var normal3 = [0, 0, 0];
+        var uv1 = [0, 0]; var uv2 = [0, 0]; var uv3 = [0, 0];
 
-            //New vertex
-            addNewVertex(vertex2, normal2, uv2, vertex3, normal3, uv3, count3, 12, 8, newPositionArray, newNormalArray, newUVArray);
+        var indexIdx = 0; //Index of current vertex index in the indexes array
+        var currVertexIdx = positions.count; //Index of next vertex to be added
 
-            //Vertex 3
-            addVertex(vertex3, normal3, uv3, count3, 15, 10, newPositionArray, newNormalArray, newUVArray);
+        var border = curr_surface_borders[index];
+
+        for (var indexCount = 0; indexCount * 3 < totalIndexCount; indexCount++) {
+
+            var index1 = indexes[(indexCount * 3)];
+            var index2 = indexes[(indexCount * 3) + 1];
+            var index3 = indexes[(indexCount * 3) + 2];
+
+            vertex1[0] = positions.array[(index1 * 3)];
+            vertex1[1] = positions.array[(index1 * 3) + 1];
+            vertex1[2] = positions.array[(index1 * 3) + 2];
+            vertex2[0] = positions.array[(index2 * 3)];
+            vertex2[1] = positions.array[(index2 * 3) + 1];
+            vertex2[2] = positions.array[(index2 * 3) + 2];
+            vertex3[0] = positions.array[(index3 * 3)];
+            vertex3[1] = positions.array[(index3 * 3) + 1];
+            vertex3[2] = positions.array[(index3 * 3) + 2];
+
+            normal1[0] = normals.array[(index1 * 3)];
+            normal1[1] = normals.array[(index1 * 3) + 1];
+            normal1[2] = normals.array[(index1 * 3) + 2];
+            normal2[0] = normals.array[(index2 * 3)];
+            normal2[1] = normals.array[(index2 * 3) + 1];
+            normal2[2] = normals.array[(index2 * 3) + 2];
+            normal3[0] = normals.array[(index3 * 3)];
+            normal3[1] = normals.array[(index3 * 3) + 1];
+            normal3[2] = normals.array[(index3 * 3) + 2];
+
+            uv1[0] = uvs.array[(index1 * 2)];
+            uv1[1] = uvs.array[(index1 * 2) + 1];
+            uv2[0] = uvs.array[(index2 * 2)];
+            uv2[1] = uvs.array[(index2 * 2) + 1];
+            uv3[0] = uvs.array[(index3 * 2)];
+            uv3[1] = uvs.array[(index3 * 2) + 1];
+
+            //Detect largest edge to divide
+            var dist1 = Math.sqrt(Math.pow((vertex2[0] - vertex1[0]), 2) + Math.pow((vertex2[1] - vertex1[1]), 2) + Math.pow((vertex2[2] - vertex1[2]), 2));
+            var dist2 = Math.sqrt(Math.pow((vertex3[0] - vertex2[0]), 2) + Math.pow((vertex3[1] - vertex2[1]), 2) + Math.pow((vertex3[2] - vertex2[2]), 2));
+            var dist3 = Math.sqrt(Math.pow((vertex3[0] - vertex1[0]), 2) + Math.pow((vertex3[1] - vertex1[1]), 2) + Math.pow((vertex3[2] - vertex1[2]), 2));
+            var maxDist = Math.max(dist1, dist2, dist3);
+
+            //Create 2 new subdivided faces, splitting the largest edge.
+            if (maxDist == dist1) {
+                //Vertex 1
+                newIndexArray[indexIdx++] = index1;
+                //New vertex
+                var newVertex = addNewIndexedVertex(vertex1, normal1, uv1, vertex2, normal2, uv2, indexIdx++, currVertexIdx, mapPositions, newIndexArray, newPositionArray, newNormalArray, newUVArray);
+                if (newVertex === currVertexIdx) currVertexIdx++;
+                updateBorderNewVertex(border, index1, index2, newVertex);
+                //Vertex 3
+                newIndexArray[indexIdx++] = index3;
+                //Vertex 2
+                newIndexArray[indexIdx++] = index2;
+                //Vertex 3
+                newIndexArray[indexIdx++] = index3;
+                //New vertex
+                newIndexArray[indexIdx++] = newVertex;
+            }
+            else if (maxDist == dist2) {
+                //Vertex 1
+                newIndexArray[indexIdx++] = index1;
+                //Vertex 2
+                newIndexArray[indexIdx++] = index2;
+                //New vertex
+                var newVertex = addNewIndexedVertex(vertex2, normal2, uv2, vertex3, normal3, uv3, indexIdx++, currVertexIdx, mapPositions, newIndexArray, newPositionArray, newNormalArray, newUVArray);
+                if (newVertex === currVertexIdx) currVertexIdx++;
+                updateBorderNewVertex(border, index2, index3, newVertex);
+                //Vertex 1
+                newIndexArray[indexIdx++] = index1;
+                //New vertex
+                newIndexArray[indexIdx++] = newVertex;
+                //Vertex 3
+                newIndexArray[indexIdx++] = index3;
+            }
+            else {
+                //Vertex 1
+                newIndexArray[indexIdx++] = index1;
+                //Vertex 2
+                newIndexArray[indexIdx++] = index2;
+                //New vertex
+                var newVertex = addNewIndexedVertex(vertex1, normal1, uv1, vertex3, normal3, uv3, indexIdx++, currVertexIdx, mapPositions, newIndexArray, newPositionArray, newNormalArray, newUVArray);
+                if (newVertex === currVertexIdx) currVertexIdx++;
+                updateBorderNewVertex(border, index1, index3, newVertex);
+                //Vertex 2
+                newIndexArray[indexIdx++] = index2;
+                //Vertex 3
+                newIndexArray[indexIdx++] = index3;
+                //New vertex
+                newIndexArray[indexIdx++] = newVertex;
+            }
+        }
+
+        newPositionArray = Float32Array.from(newPositionArray);
+        newNormalArray = Float32Array.from(newNormalArray);
+        newUVArray = Float32Array.from(newUVArray);
+
+        geometry.addAttribute("position", new THREE.BufferAttribute(newPositionArray, 3, false));
+        geometry.addAttribute("normal", new THREE.BufferAttribute(newNormalArray, 3, false));
+        geometry.addAttribute("uv", new THREE.BufferAttribute(newUVArray, 2, false));
+        geometry.setIndex(new THREE.BufferAttribute(newIndexArray, 1, false));
+        geometry.index.needsUpdate = true;
+        geometry.needsUpdate = true;
+
+        mapPositions = null;
+    }
+
+    function updateBorderNewVertex(border, index1, index2, newVertex) {
+        if (!border.has(newVertex) && border.has(index1) && border.get(index1).includes(index2)) {
+            var m1 = border.get(index1).map(function (v) { if (v === index2) return newVertex; else return v; });
+            var m2 = border.get(index2).map(function (v) { if (v === index1) return newVertex; else return v; });
+
+            border.set(index1, m1);
+            border.set(index2, m2);
+            border.set(newVertex, [index1, index2]);
+        }
+    }
+
+    function addNewIndexedVertex(vertex1, normal1, uv1, vertex2, normal2, uv2, indexIdx, currVertexIdx, map, indexArray, positionArray, normalArray, UVArray) {
+        var posVx = (vertex1[0] + vertex2[0]) / 2;
+        var posVy = (vertex1[1] + vertex2[1]) / 2;
+        var posVz = (vertex1[2] + vertex2[2]) / 2;
+
+        var addedIndex = 0;
+
+        var mapId = "" + posVx + ":" + posVy + ":" + posVz;
+
+        if (map.has(mapId)) {
+            addedIndex = map.get(mapId);
+            indexArray[indexIdx] = addedIndex;
         }
         else {
-            //Vertex 1
-            addVertex(vertex1, normal1, uv1, count3, 0, 0, newPositionArray, newNormalArray, newUVArray);
+            var norVx = (normal1[0] + normal2[0]) / 2;
+            var norVy = (normal1[1] + normal2[1]) / 2;
+            var norVz = (normal1[2] + normal2[2]) / 2;
 
-            //Vertex 2
-            addVertex(vertex2, normal2, uv2, count3, 3, 2, newPositionArray, newNormalArray, newUVArray);
+            var round = Math.pow(10, 6);
+            var uvVu = (Math.round((uv1[0] + uv2[0]) * round) / round) / 2;
+            var uvVv = (Math.round((uv1[1] + uv2[1]) * round) / round) / 2;
 
-            //New vertex
-            addNewVertex(vertex1, normal1, uv1, vertex3, normal3, uv3, count3, 6, 4, newPositionArray, newNormalArray, newUVArray);
+            indexArray[indexIdx] = currVertexIdx;
+            map.set(mapId, currVertexIdx);
+            addedIndex = currVertexIdx;
 
-            //Vertex 2
-            addVertex(vertex2, normal2, uv2, count3, 9, 6, newPositionArray, newNormalArray, newUVArray);
-
-            //Vertex 3
-            addVertex(vertex3, normal3, uv3, count3, 12, 8, newPositionArray, newNormalArray, newUVArray);
-
-            //New vertex
-            addNewVertex(vertex1, normal1, uv1, vertex3, normal3, uv3, count3, 15, 10, newPositionArray, newNormalArray, newUVArray);
+            positionArray.push(posVx, posVy, posVz);
+            normalArray.push(norVx, norVy, norVz);
+            UVArray.push(uvVu, uvVv);
         }
+        return addedIndex;
     }
 
-    geometry.addAttribute("position", new THREE.BufferAttribute(newPositionArray, 3, false));
-    geometry.addAttribute("normal", new THREE.BufferAttribute(newNormalArray, 3, false));
-    geometry.addAttribute("uv", new THREE.BufferAttribute(newUVArray, 2, false));
-    geometry.needsUpdate = true;
-}
 
-function addVertex(vertex, normal, uv, count3, i3, i2, positionArray, normalArray, UVArray) {
-    positionArray[(count3 * 6) + i3] = vertex[0];
-    positionArray[(count3 * 6) + i3 + 1] = vertex[1];
-    positionArray[(count3 * 6) + i3 + 2] = vertex[2];
+    /* INPUT/OUTPUT UTILS */
 
-    normalArray[(count3 * 6) + i3] = normal[0];
-    normalArray[(count3 * 6) + i3 + 1] = normal[1];
-    normalArray[(count3 * 6) + i3 + 2] = normal[2];
+    /**
+     * Download current model in OBJ format.
+     * @param {int} index The index of the surface.
+     * @param {float} xF Custom scaling on the X texture axis.
+     * @param {float} yF Custom scaling on the Y texture axis.
+     * @param {float} zF Custom scaling on the Z texture axis.
+     * @param {boolean} change If true, download model with original dimensions and positioning.
+     */
+    function downloadOBJ(xF = 1, yF = 1, zF = 1, change = true) {
+        return new Promise((resolve, reject) => {
+            if (group_root) {
 
-    UVArray[(count3 * 4) + i2] = uv[0];
-    UVArray[(count3 * 4) + i2 + 1] = uv[1];
-}
+                //If web workers are supported, we assign one the task.
+                if (window.Worker) {
+                    var exporter = new Worker('./libs/exportWorker.js');
 
-function addNewVertex(vertex1, normal1, uv1, vertex2, normal2, uv2, count3, i3, i2, positionArray, normalArray, UVArray) {
-    positionArray[(count3 * 6) + i3] = (vertex1[0] + vertex2[0]) / 2;
-    positionArray[(count3 * 6) + i3 + 1] = (vertex1[1] + vertex2[1]) / 2;
-    positionArray[(count3 * 6) + i3 + 2] = (vertex1[2] + vertex2[2]) / 2;
+                    exporter.postMessage(["obj", scene.toJSON(), scaleFactor,
+                        translateFactor.x, translateFactor.y, translateFactor.z,
+                        SCALE_UNIFORM[0], SCALE_UNIFORM[1], SCALE_UNIFORM[2]]);
 
-    normalArray[(count3 * 6) + i3] = (normal1[0] + normal2[0]) / 2;
-    normalArray[(count3 * 6) + i3 + 1] = (normal1[1] + normal2[1]) / 2;
-    normalArray[(count3 * 6) + i3 + 2] = (normal1[2] + normal2[2]) / 2;
-
-    var round = Math.pow(10, 6);
-    UVArray[(count3 * 4) + i2] = (Math.round((uv1[0] + uv2[0]) * round) / round) / 2;
-    UVArray[(count3 * 4) + i2 + 1] = (Math.round((uv1[1] + uv2[1]) * round) / round) / 2;
-}
-
-
-function compileJSON() {
-    var container;
-    if (container = document.getElementById("root")) {
-        var jsonString = ["{"];
-        jsonString.push('"model_type": "' + modelType + '"');
-        jsonString.push(',');
-        jsonString.push('"model_uri": "' + container.getAttribute("model_uri") + '"');
-        jsonString.push(',');
-        jsonString.push('"model_def_uri": "' + container.getAttribute("model_def_uri") + '"');
-        jsonString.push(',');
-
-        ///GET MODEL JSON
-        if (modelType === "upload") {
-            var currentSurfaces = [];
-            surfaces.forEach((surface, index) => {
-                currentSurfaces.push(surface.geometry);
-                surface.geometry = og_surfaces[index];
-            });
-
-            jsonString.push('"model_json": ' + JSON.stringify(group_root.toJSON()));
-            jsonString.push(',');
-
-            surfaces.forEach((surface, index) => {
-                surface.geometry = currentSurfaces[index];
-            });
-            currentSurfaces = null;
-        }
-        else {
-            jsonString.push('"model_json": {}');
-            jsonString.push(',');
-        }
-
-
-        jsonString.push('"scaleFactor": ' + scaleFactor);
-        jsonString.push(',');
-        jsonString.push('"translateFactor": ' + JSON.stringify(translateFactor));
-        jsonString.push(',');
-        jsonString.push('"mode": "' + viewerMode + '"');
-        jsonString.push(',');
-        jsonString.push('"color": "' + colorMaterial.color.getHexString() + '"');
-        jsonString.push(',');
-        jsonString.push('"surfaces": [');
-        surfaces.forEach((surface, index) => {
-            jsonString.push(JSON.stringify({
-                "image": referenceImages[index],
-                "material": surfaceMaterials[index].toJSON(),
-                "scale": scaleState[index],
-                "resolution": lodState[index],
-                "reference": refType[index],
-                "state": surfaceState[index]
-            }));
-            //console.log(surfaceMaterials[index]);
-            if (index != surfaces.length - 1) jsonString.push(',');
-        });
-        jsonString.push(']');
-        jsonString.push('}');
-    }
-    return jsonString.join("");
-}
-
-function downloadJSON() {
-    if (group_root) {
-        var result = compileJSON();
-
-        var blob = new Blob([result], { type: 'application/octet-stream' });
-        saveAs(blob, "model" + '.json');
-        return true;
-    }
-    else return false;
-}
-
-
-function loadJSON(json) {
-
-    return new Promise((resolve, reject) => {
-        
-
-        if (group_root) resetScene();
-
-        var surfaceList = [];
-        var matLoader = new THREE.MaterialLoader();
-        var imageLoader = new THREE.ImageLoader();
-
-
-        //console.log(json);
-        if (json.model_type === "upload") {
-
-            var surfaceCount = 0, modelCount = 0;
-
-            //Shared Materials
-            colorMaterial = new THREE.MeshPhongMaterial({
-                bumpScale: 1,
-                specular: new THREE.Color(0.1 * 0.2, 0.1 * 0.2, 0.1 * 0.2),
-                reflectivity: 0.1,
-                shininess: 30
-            });
-            wireMaterial = new THREE.MeshBasicMaterial({
-                wireframe: true
-            });
-
-            var color = parseInt(json.color, 16);
-            colorMaterial.color.set(color);
-            wireMaterial.color.set(color);
-
-            var loader = new THREE.ObjectLoader();
-            var object = loader.parse(json.model_json);
-
-            group_root = object;
-
-            object.traverse(function (child) {
-                if (child instanceof THREE.Mesh) {
-
-                    if (MODEL_ID.includes(child.name)) {
-                        //We deal with static model reference storage
-                        models.push(child);
-                        models_map[child.name] = modelCount;
-                        modelCount++;
-
-                        child.material.dispose();
-                        child.material = colorMaterial;
-                    }
-                    else {
-
-                        var vertexNumber = child.geometry.getAttribute("position").count;
-
-                        for (var medAmount = 0; ; medAmount++) {
-                            if (vertexNumber * Math.pow(2, medAmount) >= MIN_MED_THRESHOLD)
-                                break;
-                        }
-
-                        surfaces.push(child);
-                        surfaceList.push({name: child.name, med: medAmount});
-
-                        child.material.dispose();
-                        child.material = colorMaterial;
-
-                        og_surfaces.push(child.geometry.clone());
-                        curr_surfaces.push(child.geometry.clone());
-
-                        surfaceMaterials.push(null);
-
-                        //We deal with customizable surface reference storage
-                        textures.push(null);
-                        referenceImages.push(null);
-
-                        surfaces_map[child.name] = surfaceCount;
-
-                        lodState.push(0);
-                        scaleState.push(0);
-                        surfaceState.push(true);
-                        refType.push(REF_TYPE.POSITIVE);
-
-                        surfaceCount++;
+                    exporter.onmessage = function (e) {
+                        fetch(e.data).then(res => res.blob())
+                            .then(res => {
+                                saveAs(res, "model" + '.obj');
+                                URL.revokeObjectURL(e.data);
+                                exporter.terminate();
+                                resolve(true);
+                            })
+                            .catch(err => {
+                                URL.revokeObjectURL(e.data);
+                                exporter.terminate();
+                                reject(err);
+                            });
                     }
                 }
-            });
-            scene.add(object);
+                else {
+                    var result = "";
+                    var exporter = new THREE.OBJExporter();
 
-        }
-        else {
-            loadModel(json.model_uri, json.model_type, json.color).then(list => {
-                surfaceList = list;
-            });
-        }
-
-        //Set app parameters.
-        container.setAttribute("model_uri", json.model_uri);
-        container.setAttribute("model_def_uri", json.model_def_uri);
-        //container.setAttribute("model_type", json.model_type);
-
-        surfaces.forEach((_, index) => {
-            //Initialize texture material unique to each surface
-            //Oh god why is this this obtuse and annoying.
-            imageLoader.load(json.surfaces[index].material.images[0].url, function (image) {
-
-                var texture = new THREE.Texture(image);
-                var textureJSON = json.surfaces[index].material.textures[0];
-                texture.image = image;
-                texture.center.set(textureJSON.center[0], textureJSON.center[1]);
-                texture.flipY = textureJSON.flipY;
-                texture.offset.set(textureJSON.offset[0], textureJSON.offset[1]);
-                texture.rotation = textureJSON.rotation;
-                texture.wrapS = textureJSON.wrap[0];
-                texture.wrapT = textureJSON.wrap[1];
-                texture.repeat.set(textureJSON.repeat[0], textureJSON.repeat[1]);
-                texture.minFilter = textureJSON.minFilter;
-
-                console.log(json);
-                console.log(texture);
-
-                var texs = [];
-                texs[json.surfaces[index].material.textures[0].uuid] = texture;
-
-                matLoader.setTextures(texs);
-                var material = matLoader.parse(json.surfaces[index].material);
-                material.needsUpdate = true;
-                surfaceMaterials[index] = material;
-
-                //We deal with customizable surface reference storage
-                textures[index] = texture;
-                referenceImages[index] = json.surfaces[index].image;
-
-                updateSurface(index, json.surfaces[index].resolution, json.surfaces[index].scale).then(r => {
-                    changeReferenceType(index, json.surfaces[index].reference, json.surfaces[index].scale).then(r => {
-                        changeReferencePosition(index, -textures[index].offset.x*100, -textures[index].offset.y*100, textures[index].repeat.x*100, textures[index].repeat.y*100, textures[index].rotation, scaleState[index]).then(r => {
-                            
-                            changeReferenceState(index, json.surfaces[index].state, json.surfaces[index].scale);
-                            changeViewMode(json.mode);
-
+                    if (change) {
+                        group_root.traverse(function (child) {
+                            if (child instanceof THREE.Mesh) {
+                                //Return to normal scale and position.
+                                child.geometry.scale((1 / scaleFactor) * (1 / SCALE_UNIFORM[0]), (1 / scaleFactor) * (1 / SCALE_UNIFORM[1]), (1 / scaleFactor) * (1 / SCALE_UNIFORM[2]));
+                                child.geometry.translate(translateFactor.x, translateFactor.y, translateFactor.z);
+                            }
                         });
-                    });
+
+                        result = exporter.parse(group_root);
+
+                        group_root.traverse(function (child) {
+                            if (child instanceof THREE.Mesh) {
+                                //Return to modified scale and position.
+                                child.geometry.translate(-translateFactor.x, -translateFactor.y, -translateFactor.z);
+                                child.geometry.scale((scaleFactor) * (SCALE_UNIFORM[0]), (scaleFactor) * (SCALE_UNIFORM[1]), (scaleFactor) * (SCALE_UNIFORM[2]));
+                            }
+                        });
+                    }
+                    else
+                        result = exporter.parse(group_root);
+
+                    var blob = new Blob([result], { type: 'application/octet-stream' });
+                    saveAs(blob, "model" + '.obj');
+
+                    resolve(true);
+                }
+            }
+            else
+                reject(new Error("No model available for download."));
+        });
+    }
+
+    /**
+     * Download current model in STL format.
+     * @param {int} index The index of the surface.
+     * @param {float} xF Custom scaling on the X texture axis.
+     * @param {float} yF Custom scaling on the Y texture axis.
+     * @param {float} zF Custom scaling on the Z texture axis.
+     * @param {boolean} change If true, download model with original dimensions and positioning.
+     */
+    function downloadSTL(xF = 1, yF = 1, zF = 1, binary = true, change = true) {
+        return new Promise((resolve, reject) => {
+            if (group_root) {
+
+                //If web workers are supported, we assign one the task.
+                if (window.Worker) {
+                    var exporter = new Worker('./libs/exportWorker.js');
+
+                    exporter.postMessage(["stl", scene.toJSON(), scaleFactor,
+                        translateFactor.x, translateFactor.y, translateFactor.z,
+                        SCALE_UNIFORM[0], SCALE_UNIFORM[1], SCALE_UNIFORM[2],
+                        true
+                    ]);
+
+                    exporter.onmessage = function (e) {
+                        fetch(e.data).then(res => res.blob())
+                            .then(res => {
+                                saveAs(res, "model" + '.stl');
+                                URL.revokeObjectURL(e.data);
+                                exporter.terminate();
+                                resolve(true);
+                            })
+                            .catch(err => {
+                                URL.revokeObjectURL(e.data);
+                                exporter.terminate();
+                                reject(err);
+                            });
+                    }
+                }
+                else {
+                    var result = "";
+                    var exporter = new THREE.STLExporter();
+
+                    if (change) {
+                        group_root.traverse(function (child) {
+                            if (child instanceof THREE.Mesh) {
+                                //Return to normal scale and position.
+                                child.geometry.scale((1 / scaleFactor) * (1 / SCALE_UNIFORM[0]), (1 / scaleFactor) * (1 / SCALE_UNIFORM[1]), (1 / scaleFactor) * (1 / SCALE_UNIFORM[2]));
+                                child.geometry.translate(translateFactor.x, translateFactor.y, translateFactor.z);
+                            }
+                        });
+
+                        result = exporter.parse(group_root, { binary: binary });
+
+                        group_root.traverse(function (child) {
+                            if (child instanceof THREE.Mesh) {
+                                //Return to modified scale and position.
+                                child.geometry.translate(-translateFactor.x, -translateFactor.y, -translateFactor.z);
+                                child.geometry.scale((scaleFactor) * (SCALE_UNIFORM[0]), (scaleFactor) * (SCALE_UNIFORM[1]), (scaleFactor) * (SCALE_UNIFORM[2]));
+                            }
+                        });
+                    }
+                    else
+                        result = exporter.parse(group_root, { binary: binary });
+
+                    var blob = new Blob([result], { type: 'model/stl' });
+                    saveAs(blob, "model" + '.stl');
+
+                    resolve(true);
+                }
+            }
+            else
+                reject(new Error("No model available for download."));
+        });
+    }
+
+    /**
+     * Download current model in GLB format.
+     * @param {int} index The index of the surface.
+     * @param {float} xF Custom scaling on the X texture axis.
+     * @param {float} yF Custom scaling on the Y texture axis.
+     * @param {float} zF Custom scaling on the Z texture axis.
+     * @param {boolean} change If true, download model with original dimensions and positioning.
+     */
+    function downloadGLTF(xF = 1, yF = 1, zF = 1, change = true, binary = true) {
+        return new Promise((resolve, reject) => {
+            if (group_root) {
+                
+                //If web workers are supported, we assign one the task.
+                if (window.Worker) {
+                    var exporter = new Worker('./libs/exportWorker.js');
+
+                    exporter.postMessage(["gltf", scene.toJSON(), scaleFactor,
+                        translateFactor.x, translateFactor.y, translateFactor.z,
+                        SCALE_UNIFORM[0], SCALE_UNIFORM[1], SCALE_UNIFORM[2],
+                        true, binary
+                    ]);
+
+                    exporter.onmessage = function (e) {
+                        fetch(e.data).then(res => res.blob())
+                            .then(res => {
+                                saveAs(res, "model" + (binary ? '.glb' : 'gltf'));
+                                URL.revokeObjectURL(e.data);
+                                exporter.terminate();
+                                resolve(true);
+                            })
+                            .catch(err => {
+                                URL.revokeObjectURL(e.data);
+                                exporter.terminate();
+                                reject(err);
+                            });
+                    }
+                }
+                else {
+                    var exporter = new THREE.GLTFExporter();
+
+                    var onComplete = function (result) {
+                        var blob = new Blob([result], { type: (binary ? 'model/gltf-binary' : 'model/gltf+json' ) });
+                        saveAs(blob, "model" + (binary ? '.glb' : 'gltf'));
+                        resolve(true);
+                    };
+                    if (change) {
+                        group_root.traverse(function (child) {
+                            if (child instanceof THREE.Mesh) {
+                                //Return to normal scale and position.
+                                child.geometry.scale((1 / scaleFactor) * (1 / SCALE_UNIFORM[0]), (1 / scaleFactor) * (1 / SCALE_UNIFORM[1]), (1 / scaleFactor) * (1 / SCALE_UNIFORM[2]));
+                                child.geometry.translate(translateFactor.x, translateFactor.y, translateFactor.z);
+                            }
+                        });
+
+                        exporter.parse(group_root, onComplete, { forceIndices: true, binary: binary });
+
+                        group_root.traverse(function (child) {
+                            if (child instanceof THREE.Mesh) {
+                                //Return to modified scale and position.
+                                child.geometry.translate(-translateFactor.x, -translateFactor.y, -translateFactor.z);
+                                child.geometry.scale((scaleFactor) * (SCALE_UNIFORM[0]), (scaleFactor) * (SCALE_UNIFORM[1]), (scaleFactor) * (SCALE_UNIFORM[2]));
+                            }
+                        });
+                    }
+                    else
+                        exporter.parse(group_root, onComplete, { forceIndices: true, binary: binary });
+                }
+        }
+        else
+            reject(new Error("No model available for download."));
+        });
+    }
+
+
+    /** Returns a JSON with settings and representative information regarding the interface and scene. */
+    function compileJSON() {
+
+        if (!group_root)
+            return Promise.reject(new Error("No model is available."));
+
+        var container = document.getElementById("root");
+
+        //JSON structure
+        var json_obj = {
+            version: "r1.0.0",
+            model_type: "",
+            model_file: "",
+            model_format: "",
+            model_uri: "",
+            model_def_uri: "",
+            viewer_mode: "",
+            color: "",
+            surfaceCount: 0,
+            surfaces: [],
+            imageCount: 0,
+            images: []
+        };
+
+        //General shared detail
+        json_obj.model_type = modelType;
+        json_obj.model_file = modelType === MODELTYPES.UPLOAD ? "model.glb" : "";
+        json_obj.model_format = modelType === MODELTYPES.UPLOAD ? "glb" : modelFormat;
+        json_obj.model_uri = container.getAttribute("model_uri") ? container.getAttribute("model_uri") : "";
+        json_obj.model_def_uri = container.getAttribute("model_def_uri") ? container.getAttribute("model_def_uri") : "";
+        json_obj.viewer_mode = viewerMode;
+        json_obj.color = currentColor;
+
+        json_obj.surfaceCount = surfaces.length;
+
+        //Surface/Reference specific detail
+        var imageIndex = 0;
+        for (var i = 0; i < surfaces.length; i++) {
+            var surfaceObj = {};
+
+            surfaceObj.name = surfaces[i].name;
+            surfaceObj.hasReference = textures[i] ? true : false;
+            surfaceObj.referenceIndex = textures[i] ? imageIndex++ : -1;
+            surfaceObj.translateX = positionState[i][0];
+            surfaceObj.translateY = positionState[i][1];
+            surfaceObj.scaleX = positionState[i][2];
+            surfaceObj.scaleY = positionState[i][3];
+            surfaceObj.rotation = positionState[i][4];
+            surfaceObj.state = surfaceState[i];
+            surfaceObj.resolution = lodState[i];
+            surfaceObj.referenceType = refType[i];
+            surfaceObj.extrusionScale = scaleState[i];
+
+            json_obj.surfaces.push(surfaceObj);
+        }
+
+        //Acquire image details
+        var promises = [];
+
+        for (var i = 0; i < textures.length; i++) {
+            if (textures[i] !== null) {
+                promises.push(
+                    new Promise((resolve, reject) => {
+                        fetch(imageURLs[i])
+                            .then(res => res.blob())
+                            .then(res => resolve({ blob: res, index: i }))
+                    })
+                );
+            }
+        }
+
+        json_obj.imageCount = imageIndex;
+
+        return Promise.all(promises)
+            .then(values => {
+                var imageBlobs = values;
+
+                for (var i = 0; i < imageBlobs.length; i++) {
+                    var imageObj = {};
+
+                    var index = 0;
+                    for (var j = 0; j < json_obj.surfaces.length; j++)
+                        if (json_obj.surfaces[j].referenceIndex == i)
+                            index = j;
+
+                    imageObj.name = imageBlobs[i].blob.name;
+                    imageObj.type = imageBlobs[i].blob.type;
+                    imageObj.surfaceIndex = index;
+
+                    json_obj.images.push(imageObj);
+                }
+                return JSON.stringify(json_obj);
+            });
+    }
+
+    /** Download current reference settings in JSON format. */
+    function downloadJSON() {
+        return compileJSON().then(json => {
+            var blob = new Blob([json], { type: 'application/json' });
+            saveAs(blob, "settings" + '.json');
+            return true;
+        });
+    }
+
+
+    /** Returns the current model's blob resource. */
+    function getBaseModelBlob() {
+
+        return new Promise((resolve) => {
+
+            var exporter = new THREE.GLTFExporter();
+            var currSurfaces = [];
+
+            var onComplete = function (result) {
+                group_root.traverse(function (child) {
+                    if (child instanceof THREE.Mesh) {
+                        //Return to modified scale and position.
+                        child.geometry.translate(-translateFactor.x, -translateFactor.y, -translateFactor.z);
+                        child.geometry.scale((scaleFactor) * (SCALE_UNIFORM[0]), (scaleFactor) * (SCALE_UNIFORM[1]), (scaleFactor) * (SCALE_UNIFORM[2]));
+                    }
                 });
 
+                for (var i = 0; i < surfaces.length; i++) {
+                    surfaces[i].geometry = currSurfaces[i];
+                }
+
+                resolve(new Blob([result], { type: 'model/gltf-binary' }));
+            };
+
+            for (var i = 0; i < surfaces.length; i++) {
+                currSurfaces.push(surfaces[i].geometry);
+                surfaces[i].geometry = og_surfaces[i];
+            }
+
+            group_root.traverse(function (child) {
+                if (child instanceof THREE.Mesh) {
+                    //Return to normal scale and position.
+                    child.geometry.scale((1 / scaleFactor) * (1 / SCALE_UNIFORM[0]), (1 / scaleFactor) * (1 / SCALE_UNIFORM[1]), (1 / scaleFactor) * (1 / SCALE_UNIFORM[2]));
+                    child.geometry.translate(translateFactor.x, translateFactor.y, translateFactor.z);
+                }
             });
+
+            exporter.parse(group_root, onComplete, { forceIndices: true, binary: true });
+        });
+    }
+
+
+    /** Returns an array with all relevant resource/asset URLs. */
+    function getResourceURL() {
+
+        if (!group_root)
+            return Promise.reject(new Error("No model is available."));
+
+        var resourceURLList = [];
+
+        //Acquire image URLs
+        for (var i = 0; i < imageURLs.length; i++)
+            if (imageURLs[i] !== "") resourceURLList.push(imageURLs[i]);
+
+        //Acquire settings JSON URL
+        return compileJSON().then(json => {
+
+            var jsonBlob = new Blob([json], { type: 'application/json' });
+            if (jsonURL !== "") URL.revokeObjectURL(jsonURL);
+            jsonURL = URL.createObjectURL(new File([jsonBlob], "settings.json", { type: 'application/json' }));
+            resourceURLList.push(jsonURL);
+
+            //Acquire model URL
+            if (JSON.parse(json).model_type === MODELTYPES.UPLOAD) {
+                getBaseModelBlob().then(blob => {
+                    if (modelURL !== "") URL.revokeObjectURL(modelURL);
+                    modelURL = URL.createObjectURL(new File([blob], "model.glb", { type: 'model/gltf-binary' }));
+                    resourceURLList.push(modelURL);
+                    return resourceURLList;
+                });
+            }
+            else
+                return resourceURLList;
         });
 
-        scaleFactor = json.scaleFactor;
-        translateFactor = json.translateFactor;
-        modelType = json.model_type;
+    }
 
-        ///console.log("!");
-        surfaceList.forEach((surfaceDetail, index) => {
-            surfaceDetail["transX"] = json.surfaces[index].material.textures[0].offset[0]*100;
-            surfaceDetail["transY"] = json.surfaces[index].material.textures[0].offset[1]*100;
-            surfaceDetail["scaleX"] = json.surfaces[index].material.textures[0].repeat[0]*100;
-            surfaceDetail["scaleY"] = json.surfaces[index].material.textures[0].repeat[1]*100;
-            surfaceDetail["rotation"] = json.surfaces[index].material.textures[0].rotation;
-            surfaceDetail["extrusion"] = json.surfaces[index].scale;
-            surfaceDetail["resolution"] = json.surfaces[index].resolution;
-            surfaceDetail["reference"] = json.surfaces[index].reference;
-            surfaceDetail["state"] = json.surfaces[index].state;
-            surfaceDetail["img_url"] = json.surfaces[index].material.images[0].url;
+    /** Returns an array with all relevant resource/asset blobs or files. */
+    function getResourceBlobs() {
+
+        if (!group_root)
+            return Promise.reject(new Error("No model is available."));
+
+        var resourceBlobList = [];
+
+        //Acquire image blobs
+        var promises = [];
+
+        for (var i = 0; i < textures.length; i++) {
+            if (textures[i] !== null) {
+                promises.push(
+                    new Promise((resolve, reject) => {
+                        fetch(imageURLs[i])
+                            .then(res => res.blob())
+                            .then(res => resolve(res))
+                    })
+                );
+            }
+        }
+
+        return Promise.all(promises)
+            .then(values => {
+                var imageBlobs = values;
+                for (var i = 0; i < imageBlobs.length; i++)
+                    resourceBlobList.push(imageBlobs[i]);
+
+                //Acquire settings JSON blob
+                return compileJSON().then(json => {
+
+                    var jsonBlob = new Blob([json], { type: 'application/json' });
+                    resourceBlobList.push(new File([jsonBlob], "settings.json", { type: 'application/json' }));
+
+                    //Acquire model blob
+                    if (JSON.parse(json).model_type === MODELTYPES.UPLOAD) {
+                        return getBaseModelBlob().then(blob => {
+                            resourceBlobList.push(new File([blob], "model.glb", { type: 'model/gltf-binary' }));
+                            return resourceBlobList;
+                        });
+                    }
+                    else
+                        return resourceBlobList;
+                });
+            });
+    }
+
+    /**
+     * Download complete scene (model, reference images and settings) as a zip file.
+     * @param {function} updateCallback Optional callback function for progress feedback.
+     */
+    function downloadZip(updateCallback = function (metadata) { }) {
+
+        if (!group_root)
+            return Promise.reject(new Error("No model is available."));
+
+        return getResourceBlobs().then(blobs => {
+
+            var zip = new JSZip();
+
+            for (var i = 0; i < blobs.length; i++) {
+                var blob = blobs[i];
+                zip.file(blob.name, blob);
+            }
+
+            return zip.generateAsync({
+                type: "blob",
+                compression: "DEFLATE",
+                compressionOptions: { level: 2 }
+            }, updateCallback
+            ).then(function (blob) {
+                saveAs(blob, "model" + '.zip');
+                return true;
+            })
         });
+    }
 
-        resolve(surfaceList);
+    /**
+     * Returns a blob or URL for a ZIP file containing all relevant resources/images/assets/files to recreate scene. 
+     * @param {function} getBlob If true, function returns reference as Blob. Otherwise, it returns a URL to a Blob.
+     * @param {function} updateCallback Optional callback function for progress feedback.
+     */
+    function getResourceZipRef(getBlob = false, updateCallback = function (metadata) { }) {
 
-    });
-}
+        if (!group_root)
+            return Promise.reject(new Error("No model is available."));
+
+        return getResourceBlobs().then(blobs => {
+
+            var zip = new JSZip();
+
+            for (var i = 0; i < blobs.length; i++) {
+                var blob = blobs[i];
+                zip.file(blob.name, blob);
+            }
+
+            return zip.generateAsync({
+                type: "blob",
+                compression: "DEFLATE",
+                compressionOptions: { level: 2 }
+            }, updateCallback
+            ).then(function (blob) {
+                if (getBlob)
+                    return blob;
+                else
+                    return URL.createObjectURL(blob);
+            })
+        });
+    }
+
+    /**
+     * Load scene using model, images and settings from within a zip file.
+     * @param {string} zipFile The URL/Blob of the zip file.
+     */
+    function loadZip(zipFile) {
+        var zipUnpacker = new JSZip();
+        return zipUnpacker.loadAsync(zipFile)
+            .then(zip => {
+                //Unpack settings
+                return zip.file("settings.json").async("text")
+                    .then(jsonData => {
+                        var json = JSON.parse(jsonData);
+                        var modelIsUpload = json.model_type === MODELTYPES.UPLOAD;
+
+                        //Validation
+                        if (!validateZippedJson(json, zip))
+                            throw new Error("Invalid JSON.");
+
+                        //Unpack model if necessary
+                        if (modelIsUpload) {
+                            return zip.file(json.model_file).async("blob")
+                                .then(modelBlob => {
+                                    if (modelURL !== "") URL.revokeObjectURL(modelURL);
+                                    modelURL = URL.createObjectURL(new File([modelBlob], json.model_file, { type: 'model/gltf-binary' }));
+
+                                    return loadModel(modelURL, json.model_format, json.model_type, json.color)
+                                        .then(surfaceList => {
+                                            //Unpack images
+                                            return unpackImages(zip, json, surfaceList).then(surfaceList => {
+                                                colorize(json.color);
+                                                changeViewMode(json.viewer_mode);
+                                                return { surfaceList: surfaceList, color: json.color, viewMode: json.viewer_mode, model_url: json.model_uri, model_def_url: json.model_def_uri, model_type: json.model_type };
+                                            })
+                                        })
+                                });
+                        }
+                        else return loadModel(json.model_uri, json.model_format, json.model_type, json.color)
+                            .then(surfaceList => {
+                                //Unpack images
+                                return unpackImages(zip, json, surfaceList).then(surfaceList => {
+                                    colorize(json.color);
+                                    changeViewMode(json.viewer_mode);
+                                    return { surfaceList: surfaceList, color: json.color, viewMode: json.viewer_mode, model_url: json.model_uri, model_def_url: json.model_def_uri, model_type: json.model_type };
+                                });
+                            });
+                    });
+            });
+    }
+
+    /** 
+     * Validate JSON. Returns true if it is valid for the zip loading process. 
+     * @param {object} zip The zip file.
+     * @param {object} json The JSON object detailing the zip file resources.
+     */
+    function validateZippedJson(json, zip) {
+
+        var validity =
+            //Valid inputs
+            json && zip && typeof (json) === 'object' &&
+            //Correct version
+            json.version === "r1.0.0" &&
+            //Matching surface counts
+            json.surfaceCount === json.surfaces.length &&
+            //Matching image counts
+            json.imageCount === json.images.length &&
+            //Mandatory general fields
+            json.model_type && json.model_type !== "" && json.model_format && json.model_format !== "" && json.viewer_mode && json.viewer_mode !== "" && json.color && json.color !== "" &&
+            (json.model_type === MODELTYPES.UPLOAD ? (json.model_file && json.model_file !== "") : (json.model_uri && json.model_uri !== "")) &&
+            //Valid model type
+            [MODELTYPES.UPLOAD, MODELTYPES.PREMADE, MODELTYPES.RECONSTRUCT].includes(json.model_type) &&
+            //Matching surface index crossreferencing
+            json.surfaces.every((surface, index) => { return (surface.hasReference ? json.images[surface.referenceIndex] && json.images[surface.referenceIndex].surfaceIndex === index : true) }) &&
+            //Matching reference image index crossreferencing
+            json.images.every((image, index) => { return (json.surfaces[image.surfaceIndex] && json.surfaces[image.surfaceIndex].referenceIndex === index) }) &&
+            //Check if all image files are present
+            json.images.every((image) => { return zip.file(image.name) }) &&
+            //Check if model file is present
+            (json.model_type === MODELTYPES.UPLOAD ? zip.file(json.model_file) : true) &&
+            //Mandatory surface fields
+            json.surfaces.every((surface) => {
+                return (!isNaN(surface.translateX) && !isNaN(surface.translateY) && !isNaN(surface.scaleX) && !isNaN(surface.scaleY) && !isNaN(surface.scaleY) &&
+                    !isNaN(surface.extrusionScale) && !isNaN(surface.resolution) && [REF_TYPE.POSITIVE, REF_TYPE.NEGATIVE].includes(surface.referenceType));
+            });
+
+        return validity;
+    }
+
+    /** 
+     * Create pool of image handlers to add each as a reference and retrieve updated surface detail listing.
+     * @param {object} zip The zip file.
+     * @param {object} json The JSON object detailing the zip file resources.
+     * @param {Array} surfaceList The list/array where all surface reference details are stored.
+     */
+    function unpackImages(zip, json, surfaceList) {
+
+        //We create a promise pool to handle all references and retrieve the collective result.
+        var referenceAdditions = [];
+        for (var i = 0; i < json.imageCount; i++)
+            referenceAdditions.push(addZippedReference(zip, json, surfaceList, i));
+
+        return Promise.all(referenceAdditions).then(() => {
+            surfaceList.forEach((surfaceDetail, index) => {
+                surfaceDetail["transX"] = json.surfaces[index].translateX;
+                surfaceDetail["transY"] = json.surfaces[index].translateY;
+                surfaceDetail["scaleX"] = 1 / json.surfaces[index].scaleX;
+                surfaceDetail["scaleY"] = 1 / json.surfaces[index].scaleY;
+                surfaceDetail["rotation"] = json.surfaces[index].rotation;
+                surfaceDetail["extrusion"] = json.surfaces[index].extrusionScale;
+                surfaceDetail["resolution"] = json.surfaces[index].resolution;
+                surfaceDetail["reference"] = json.surfaces[index].referenceType;
+                surfaceDetail["state"] = json.surfaces[index].state;
+            });
+            return surfaceList;
+        });
+    }
+
+    /** 
+     * Unzip image referenced at the index of the json reference and add it as a surface reference in current scene.
+     * @param {object} zip The zip file.
+     * @param {object} json The JSON object detailing the zip file resources.
+     * @param {Array} surfaceList The list/array where all surface reference details are stored.
+     * @param {int} index The index of the reference.
+     */
+    function addZippedReference(zip, json, surfaceList, index) {
+        //Unzip image file and add it as reference
+        return zip.file(json.images[index].name).async("blob")
+            .then(imageBlob => {
+                var imageURL = URL.createObjectURL(new File([imageBlob], json.images[index].name, { type: json.images[index].type }));
+                var surfaceIndex = json.images[index].surfaceIndex;
+                surfaceList[surfaceIndex].img_url = imageURL;
+
+                return addReference(surfaceIndex, imageURL, json.surfaces[surfaceIndex].resolution, json.surfaces[surfaceIndex].extrusionScale)
+                    .then(() => {
+                        //Reinstate reference configurations
+                        changeReferencePosition(surfaceIndex, json.surfaces[surfaceIndex].translateX, json.surfaces[surfaceIndex].translateY, json.surfaces[surfaceIndex].scaleX, json.surfaces[surfaceIndex].scaleY, json.surfaces[surfaceIndex].rotation, json.surfaces[surfaceIndex].extrusionScale);
+                        changeReferenceType(surfaceIndex, json.surfaces[surfaceIndex].referenceType, json.surfaces[surfaceIndex].extrusionScale);
+                        changeReferenceState(surfaceIndex, json.surfaces[surfaceIndex].state, json.surfaces[surfaceIndex].extrusionScale);
+                        return true;
+                    })
+            });
+    }
+
+    return {
+        createScene: createScene,
+        resetScene: resetScene,
+
+        loadModel: loadModel,
+        loadZip: loadZip,
+
+        colorize: colorize,
+        changeViewMode: changeViewMode,
+
+        addReference: addReference,
+        removeReference: removeReference,
+        applyReference: applyReference,
+
+        updateSurface: updateSurface,
+        processImage: processImage,
+
+        changeReferenceState: changeReferenceState,
+        changeReferenceType: changeReferenceType,
+        changeReferencePosition: changeReferencePosition,
+
+        getResourceURL: getResourceURL,
+        getResourceBlobs: getResourceBlobs,
+        getResourceZipRef: getResourceZipRef,
+
+        downloadOBJ: downloadOBJ,
+        downloadGLTF: downloadGLTF,
+        downloadSTL: downloadSTL,
+        downloadJSON: downloadJSON,
+        downloadZip: downloadZip,
+
+        placeholderImage: placeholderImage,
+        isMobile: IS_MOBILE,
+        MODELTYPES: MODELTYPES,
+        REF_TYPE: REF_TYPE,
+        VIEWMODES: VIEWMODES
+    };
+
+}());
+
+//export default LITHO3D;

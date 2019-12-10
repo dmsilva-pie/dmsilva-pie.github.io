@@ -1,15 +1,13 @@
 import React, { Component } from 'react';
-//import { debounce } from "lodash";
-
+import '../css/App.css';
 
 import Box from '@material-ui/core/Box';
 import ExpansionPanel from '@material-ui/core/ExpansionPanel';
 import ExpansionPanelSummary from '@material-ui/core/ExpansionPanelSummary';
 import ExpansionPanelDetails from '@material-ui/core/ExpansionPanelDetails';
 import Typography from '@material-ui/core/Typography';
-import ListItemIcon from '@material-ui/core/ListItemIcon';
-import IconButton from '@material-ui/core/IconButton';
 
+import IconButton from '@material-ui/core/IconButton';
 import Button from '@material-ui/core/Button';
 import Radio from '@material-ui/core/Radio';
 import RadioGroup from '@material-ui/core/RadioGroup';
@@ -19,6 +17,9 @@ import FormLabel from '@material-ui/core/FormLabel';
 
 import Snackbar from '@material-ui/core/Snackbar';
 
+import MenuIcon from '@material-ui/icons/Menu';
+import ChevronRightIcon from '@material-ui/icons/ChevronRight';
+import ListItemIcon from '@material-ui/core/ListItemIcon';
 import HelpIcon from '@material-ui/icons/Help';
 import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
 import ColorLensIcon from '@material-ui/icons/ColorLens';
@@ -28,7 +29,6 @@ import ViewIcon from '@material-ui/icons/RemoveRedEye';
 import PublishIcon from '@material-ui/icons/Publish';
 import CloudDownloadIcon from '@material-ui/icons/CloudDownload';
 import CloseIcon from '@material-ui/icons/Close';
-
 
 import Dialog from '@material-ui/core/Dialog';
 import DialogActions from '@material-ui/core/DialogActions';
@@ -41,6 +41,7 @@ import Files from 'react-files';
 import SurfaceList from './SurfaceList';
 import HelpMenu from './HelpMenu';
 
+
 const styles = {
 	root: {
 		width: '100%',
@@ -52,14 +53,14 @@ const styles = {
 		height: '100%',
 		overflowY: 'auto',
 		overflowX: 'hidden',
-		paddingright: '20px',
+		paddingRight: '20px'
 	},
 	heading: {
 		fontSize: 15,
 		fontWeight: 300,
 	},
 	colorpicker: {
-		maxHeight: "80px",
+		maxHeight: "100px",
 		overflow: 'hidden'
 	},
 	helper: {
@@ -75,13 +76,16 @@ const styles = {
 		margin: "auto",
 		height: "100px",
 		border: "3px dotted #a3a199"
+	},
+	mobileTransparent: {
+		backgroundColor: window.LITHO3D.isMobile ? "rgba(230,230,230,0.1)" : "rgba(255,255,255,1)",
+	},
+	toolbar: {
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'flex-end',
+		padding: '5px 8px'
 	}
-};
-
-const MODELTYPES = {
-	UPLOAD: "upload",
-	PREMADE: "premade",
-	PREMADE_CUSTOM: "premade_custom"
 };
 
 export default class OptionMenu extends Component {
@@ -94,13 +98,12 @@ export default class OptionMenu extends Component {
 			model_type: "",
 			surfaceList: [],
 			color: '#FCB900',
-			wireframeView: false,
-			textureView: false,
 			expandedMenu: null,
 			viewDisplay: "color",
 			snackbarOpen: false,
+			snackbarDuration: 0,
 			snackbarMsg: "",
-			isUpload: false,
+			isUpload: true,
 			isUploadDialogOpen: false,
 			uploadedModel: null
 		};
@@ -113,137 +116,240 @@ export default class OptionMenu extends Component {
 		this.handleUploaderError = this.handleUploaderError.bind(this);
 		this.handleSnackbarClose = this.handleSnackbarClose.bind(this);
 		this.emitWarningMessage = this.emitWarningMessage.bind(this);
+		this.downloadModelOBJ = this.downloadModelOBJ.bind(this);
+		this.downloadModelSTL = this.downloadModelSTL.bind(this);
+		this.downloadModelGLB = this.downloadModelGLB.bind(this);
+		this.downloadJSON = this.downloadJSON.bind(this);
+		this.downloadZip = this.downloadZip.bind(this);
 	}
 
-
+	/** On mount, load default model */
 	componentDidMount() {
-		this.props.loadingToggle();
+		this.props.loadingToggle(true);
 		this.getConfiguration().then(() => {
 
-			if (this.state.model_uri && this.state.model_uri !== "" && this.state.model_uri !== "null" && (this.state.model_type === MODELTYPES.PREMADE || this.state.model_type === MODELTYPES.PREMADE_CUSTOM)) {
-				window.loadModel(this.state.model_uri, this.state.model_type, this.state.color)
+			//Load default model, if specified.
+			if (this.state.model_uri !== "") {
+				var re = /(?:\.([^.]+))?$/;
+				var format = re.exec(this.state.model_uri)[1];
+				if (format === undefined) format = "obj";
+				var isUpload = this.state.model_type === window.LITHO3D.MODELTYPES.UPLOAD;
+
+				window.LITHO3D.loadModel(this.state.model_uri, format, this.state.model_type, this.state.color)
 					.then(surfaces => {
-						this.setState({ surfaceList: surfaces }, this.props.loadingToggle);
+						this.setState({ isUpload: isUpload, isUploadDialogOpen: false, surfaceList: surfaces },
+							this.props.loadingToggle(false));
+					})
+					.catch(err => {
+						this.setState({ isUpload: isUpload, isUploadDialogOpen: isUpload });
+						this.emitWarningMessage(err.message);
+						this.props.loadingToggle(false);
 					});
 			}
-			else if (this.state.model_type === MODELTYPES.UPLOAD) {
-				this.setState({ isUpload: true, isUploadDialogOpen: true });
-				//call dialog open
-				this.props.loadingToggle();
-			}
-
+			else
+				this.props.loadingToggle(false);
 		});
 	}
 
-	/* Acquire configurations from root element */
+	/** Acquire default configurations from root element */
 	getConfiguration() {
-		return new Promise(resolve => {
+		return new Promise((resolve) => {
 			var container = document.getElementById("root");
-
 			this.setState({
 				model_uri: container.hasAttribute('model_uri') ? container.getAttribute('model_uri') : "",
 				model_def_uri: container.hasAttribute('model_def_uri') ? container.getAttribute('model_def_uri') : "",
 				model_type: container.hasAttribute('model_type') ? container.getAttribute('model_type') : "upload",
 				color: container.hasAttribute('defaultColor') ? container.getAttribute('defaultColor') : "#FCB900"
-			}, resolve);
+			}, resolve(true));
 		});
 	}
 
-	downloadModel() {
-		window.downloadOBJ(true);
+	/** Download the model in STL format */
+	downloadModelSTL() {
+		this.emitWarningMessage("Preparing STL file...", 60000);
+		this.props.loadingToggle(true);
+		window.LITHO3D.downloadSTL(1, 1, 1, true, false).then(() => {
+			this.props.loadingToggle(false);
+			this.emitWarningMessage("File is ready for download.", 500);
+		})
+			.catch(err => {
+				this.props.loadingToggle(false);
+				this.emitWarningMessage(err.message);
+			});
 	}
-
+	/** Download the model in OBJ format */
+	downloadModelOBJ() {
+		this.emitWarningMessage("Preparing OBJ file...", 60000);
+		this.props.loadingToggle(true);
+		window.LITHO3D.downloadOBJ(1, 1, 1, true).then(() => {
+			this.props.loadingToggle(false);
+			this.emitWarningMessage("File is ready for download.", 500);
+		})
+			.catch(err => {
+				this.props.loadingToggle(false);
+				this.emitWarningMessage(err.message);
+			});
+	}
+	/** Download the model in GLB format */
+	downloadModelGLB() {
+		this.emitWarningMessage("Preparing GLTF file...", 60000);
+		this.props.loadingToggle(true);
+		window.LITHO3D.downloadGLTF(1, 1, 1, false, true).then(() => {
+			this.props.loadingToggle(false);
+			this.emitWarningMessage("File is ready for download.", 500);
+		})
+			.catch(err => {
+				this.props.loadingToggle(false);
+				this.emitWarningMessage(err.message);
+			});
+	}
+	/** Download the model, images and settings in ZIP format */
+	downloadZip() {
+		this.emitWarningMessage("Preparing ZIP file...", 60000);
+		this.props.loadingToggle(true);
+		window.LITHO3D.downloadZip().then(res => {
+			this.props.loadingToggle(false);
+			this.emitWarningMessage("File is ready for download.", 500);
+		})
+			.catch(err => {
+				this.props.loadingToggle(false);
+				this.emitWarningMessage(err.message);
+			});
+	}
+	/** Download the settings in JSON format */
 	downloadJSON() {
-		window.downloadJSON();
+		this.emitWarningMessage("Downloading JSON file...", 60000);
+		this.props.loadingToggle(true);
+		window.LITHO3D.downloadJSON().then(res => {
+			this.props.loadingToggle(false);
+			this.emitWarningMessage("File is ready for download.", 500);
+		})
+			.catch(err => {
+				this.emitWarningMessage(err.message);
+				this.props.loadingToggle(false);
+			});
 	}
 
+	/** Process the upload of a model file or zip */
 	handleUploaderSave(files) {
 		if (files.length > 0) {
-			if (files[0].extension === "obj") {
-				if (this.state.uploadedModel) URL.revokeObjectURL(this.state.uploadedModel);
+			if (files[0].extension !== "zip") {
 
-				this.setState({ uploadedModel: URL.createObjectURL(files[0]), isUploadDialogOpen: false }, () => {
-					this.props.loadingToggle();
-					window.loadModel(this.state.uploadedModel, this.state.model_type, this.state.color)
+				var uploadedModel = URL.createObjectURL(files[0]);
+
+				this.setState({ isUploadDialogOpen: false }, () => {
+					this.props.loadingToggle(true);
+					window.LITHO3D.loadModel(uploadedModel, files[0].extension, this.state.model_type, this.state.color)
 						.then(surfaces => {
-							this.setState({ surfaceList: surfaces }, this.props.loadingToggle);
-						});
-				});
-			}
-			else if (files[0].extension === "json") {
-				if (this.state.uploadedModel) URL.revokeObjectURL(this.state.uploadedModel);
-
-				this.setState({ uploadedModel: URL.createObjectURL(files[0]), isUploadDialogOpen: false }, () => {
-					this.props.loadingToggle();
-					fetch(this.state.uploadedModel)
-						.then(response => response.json())
-						.then(data => {
-							window.loadJSON(data).then(surfaces => {
-								this.setState({ surfaceList: surfaces, color: data.color.toString(16) }, this.props.loadingToggle);
+							this.setState({ surfaceList: [], model_def_uri: "" }, () => {
+								if (this.state.uploadedModel) URL.revokeObjectURL(this.state.uploadedModel);
+								this.setState({ surfaceList: surfaces, uploadedModel: uploadedModel },
+									this.props.loadingToggle(false));
 							});
 						})
-						.catch((error) => {
-							console.error(error);
-							this.props.loadingToggle();
+						.catch(err => {
+							URL.revokeObjectURL(uploadedModel);
+							if (this.refs.upload) this.refs.upload.setState({ files: [] });
+							this.emitWarningMessage(err.message);
+							this.props.loadingToggle(false);
+							this.setState({ isUploadDialogOpen: true });
 						});
-
 				});
 			}
-
+			else if (files[0].extension === "zip") {
+				this.setState({ isUploadDialogOpen: false }, () => {
+					this.props.loadingToggle(true);
+					this.emitWarningMessage("Unpacking zip file. Loading...", 60000);
+					window.LITHO3D.loadZip(files[0])
+						.then(result => {
+							this.setState({
+								surfaceList: [],
+								model_uri: "",
+								model_def_uri: ""
+							}, () => {
+								this.setState({
+									surfaceList: result.surfaceList,
+									color: result.color,
+									viewDisplay: result.viewMode,
+									uploadedModel: result.model_url,
+									model_type: result.model_type,
+									model_uri: result.model_url,
+									model_def_uri: result.model_def_url
+								}, () => {
+									this.props.loadingToggle(false);
+									this.emitWarningMessage("Model loading complete.", 500);
+								})
+									
+							});
+						})
+						.catch(err => {
+							if (this.refs.upload) this.refs.upload.setState({ files: [] });
+							this.emitWarningMessage(err.message);
+							this.props.loadingToggle(false);
+							this.setState({ isUploadDialogOpen: true });
+						});
+				});
+			}
 		}
 	}
 
 	handleUploaderError(error, file) {
 		this.emitWarningMessage(error.message);
 	}
-
 	handleUploaderOpen() {
 		this.setState({ isUploadDialogOpen: true });
 	}
-
 	handleUploaderClose() {
 		this.setState({ isUploadDialogOpen: false });
 	}
 
+	emitWarningMessage(message, duration = 5000) {
+		this.setState({ snackbarOpen: false, snackbarMsg: "", snackbarDuration: 0 },
+			() => { this.setState({ snackbarOpen: true, snackbarMsg: message, snackbarDuration: duration }) });
+	}
 	handleSnackbarClose(event, reason) {
 		if (reason === 'clickaway') { return; }
-		this.setState({ snackbarOpen: false, snackbarMsg: "" });
+		this.setState({ snackbarOpen: false, snackbarMsg: "", snackbarDuration: 0 });
 	}
 
-	emitWarningMessage(message) {
-		this.setState({ snackbarOpen: true, snackbarMsg: message });
-	}
-
-
-	handleViewCheck(event) {
-		var mode = event.target.value;
-		if (this.state.viewDisplay !== mode) {
-			this.props.loadingToggle();
-			this.setState({ viewDisplay: mode }, () => {
-				window.changeViewMode(mode)
-					.then(result => {
-						this.props.loadingToggle();
-					});
-			});
-		}
-	};
-
+	/** Change currently selected toolbar menu/tab */
 	handleMenuChange = panel => (event, isExpanded) => {
 		this.setState({ expandedMenu: isExpanded ? panel : false });
 		this.props.openFunction();
 	};
 
+	/** Process the change of viewer mode */
+	handleViewCheck(event) {
+		var mode = event.target.value;
+		if (this.state.viewDisplay !== mode) {
+			this.props.loadingToggle(true);
+			if (window.LITHO3D.changeViewMode(mode)) {
+				this.setState({ viewDisplay: mode }, this.props.loadingToggle(false));
+			}
+			else {
+				this.emitWarningMessage("No model is available.");
+				this.props.loadingToggle(false);
+			}
+		}
+	};
+
+	/** Process the change of model color */
 	handleColorChange = (color, event) => {
 		if (this.state.color !== color.hex) {
-			this.props.loadingToggle();
-			this.setState({ color: color.hex }, () => {
-				window.colorize(color)
-					.then(result => {
-						this.props.loadingToggle();
-					});
-			});
+			if(this.props.isMobile)
+				this.props.warningFunc("Changing model color...", 10000);
+			this.props.loadingToggle(true);
+			if (window.LITHO3D.colorize(color.hex)) {
+				this.setState({ color: color.hex });
+				this.props.loadingToggle(false);
+				if(this.props.isMobile)
+					this.props.warningFunc("New model color was set.", 500);
+			}
+			else {
+				this.emitWarningMessage("No model is available to color.");
+				this.props.loadingToggle(false);
+			}
 		}
-
 	};
 
 	render() {
@@ -259,11 +365,12 @@ export default class OptionMenu extends Component {
 								className='files-dropzone'
 								onChange={this.handleUploaderSave}
 								onError={this.handleUploaderError}
-								accepts={['.obj', '.json']}
+								accepts={['.obj', '.glb', '.zip']}
 								multiple={false}
 								maxFiles={1}
-								maxFileSize={200000000}
+								maxFileSize={100000000}
 								minFileSize={0}
+								ref='upload'
 								clickable
 							>
 								<Box display="flex" px={3} py={5} alignItems="center" justifyContent="center" style={styles.uploader}>
@@ -285,7 +392,7 @@ export default class OptionMenu extends Component {
 							horizontal: 'left',
 						}}
 						open={this.state.snackbarOpen}
-						autoHideDuration={6000}
+						autoHideDuration={this.state.snackbarDuration}
 						onClose={this.handleSnackbarClose}
 						ContentProps={{
 							'aria-describedby': 'message-id',
@@ -303,9 +410,18 @@ export default class OptionMenu extends Component {
 						]}
 					/>
 
+					{/* MENU HEADER */}
+					{window.LITHO3D.isMobile ?
+						<div style={styles.toolbar}>
+							<IconButton onClick={this.props.openToggle}>
+								{this.props.open ? <ChevronRightIcon /> : <MenuIcon />}
+							</IconButton>
+						</div> : null}
+
+
 					{/* UPLOAD MENU */}
 					{this.state.isUpload ? <React.Fragment>
-						<ExpansionPanel expanded={this.props.open && (this.state.expandedMenu === 'upload')} onChange={this.handleMenuChange('upload')} TransitionProps={{ unmountOnExit: true }}>
+						<ExpansionPanel elevation={window.LITHO3D.isMobile ? 0 : 1} style={styles.mobileTransparent} expanded={this.props.open && (this.state.expandedMenu === 'upload')} onChange={this.handleMenuChange('upload')} TransitionProps={{ unmountOnExit: true }}>
 							<ExpansionPanelSummary
 								expandIcon={this.props.open ? <ExpandMoreIcon /> : null}
 								aria-controls="panel1a-content"
@@ -321,7 +437,7 @@ export default class OptionMenu extends Component {
 
 
 					{/* COLOR CHANGE MENU */}
-					<ExpansionPanel expanded={this.props.open && (this.state.expandedMenu === 'color')} onChange={this.handleMenuChange('color')} TransitionProps={{ unmountOnExit: true }}>
+					<ExpansionPanel elevation={window.LITHO3D.isMobile ? 0 : 1} style={styles.mobileTransparent} expanded={this.props.open && (this.state.expandedMenu === 'color')} onChange={this.handleMenuChange('color')} TransitionProps={{ unmountOnExit: true }}>
 						<ExpansionPanelSummary
 							expandIcon={this.props.open ? <ExpandMoreIcon /> : null}
 							aria-controls="panel1a-content"
@@ -343,7 +459,7 @@ export default class OptionMenu extends Component {
 
 
 					{/* SURFACE EDIT MENU */}
-					<ExpansionPanel expanded={this.props.open && (this.state.expandedMenu === 'surfaces')} onChange={this.handleMenuChange('surfaces')}>
+					<ExpansionPanel elevation={window.LITHO3D.isMobile ? 0 : 1} style={styles.mobileTransparent} expanded={this.props.open && (this.state.expandedMenu === 'surfaces')} onChange={this.handleMenuChange('surfaces')}>
 						<ExpansionPanelSummary
 							expandIcon={this.props.open ? <ExpandMoreIcon /> : null}
 							aria-controls="panel2a-content"
@@ -355,6 +471,7 @@ export default class OptionMenu extends Component {
 						<ExpansionPanelDetails>
 							<SurfaceList
 								loading={this.props.loadingToggle}
+								isUpload={this.state.uploadedModel !== null}
 								model_def_uri={this.state.model_def_uri}
 								surfaces={this.state.surfaceList}
 								warningFunc={this.emitWarningMessage}
@@ -364,7 +481,7 @@ export default class OptionMenu extends Component {
 
 
 					{/* OPTIONS MENU */}
-					<ExpansionPanel expanded={this.props.open && (this.state.expandedMenu === 'options')} onChange={this.handleMenuChange('options')} TransitionProps={{ unmountOnExit: true }}>
+					<ExpansionPanel elevation={window.LITHO3D.isMobile ? 0 : 1} style={styles.mobileTransparent} expanded={this.props.open && (this.state.expandedMenu === 'options')} onChange={this.handleMenuChange('options')} TransitionProps={{ unmountOnExit: true }}>
 						<ExpansionPanelSummary
 							expandIcon={this.props.open ? <ExpandMoreIcon /> : null}
 							aria-controls="panel2a-content"
@@ -392,7 +509,7 @@ export default class OptionMenu extends Component {
 
 
 					{/* HELP MENU */}
-					<ExpansionPanel expanded={this.props.open && (this.state.expandedMenu === 'help')} onChange={this.handleMenuChange('help')} TransitionProps={{ unmountOnExit: true }}>
+					<ExpansionPanel elevation={window.LITHO3D.isMobile ? 0 : 1} style={styles.mobileTransparent} expanded={this.props.open && (this.state.expandedMenu === 'help')} onChange={this.handleMenuChange('help')} TransitionProps={{ unmountOnExit: true }}>
 						<ExpansionPanelSummary
 							expandIcon={this.props.open ? <ExpandMoreIcon /> : null}
 							aria-controls="panel2a-content"
@@ -406,9 +523,10 @@ export default class OptionMenu extends Component {
 						</ExpansionPanelDetails>
 					</ExpansionPanel>
 
+
 					{/* DOWNLOAD/SERVER MENU */}
-					{true ? <React.Fragment>
-						<ExpansionPanel expanded={this.props.open && (this.state.expandedMenu === 'download')} onChange={this.handleMenuChange('download')} TransitionProps={{ unmountOnExit: true }}>
+					{this.state.isUpload ? <React.Fragment>
+						<ExpansionPanel elevation={window.LITHO3D.isMobile ? 0 : 1} style={styles.mobileTransparent} expanded={this.props.open && (this.state.expandedMenu === 'download')} onChange={this.handleMenuChange('download')} TransitionProps={{ unmountOnExit: true }}>
 							<ExpansionPanelSummary
 								expandIcon={this.props.open ? <ExpandMoreIcon /> : null}
 								aria-controls="panel1a-content"
@@ -418,8 +536,25 @@ export default class OptionMenu extends Component {
 									<Box ml={3}><ListItemIcon><CloudDownloadIcon /></ListItemIcon></Box>}
 							</ExpansionPanelSummary>
 							<ExpansionPanelDetails>
-								<Button onClick={this.downloadModel} color="primary">Download OBJ</Button>
-								<Button onClick={this.downloadJSON} color="primary">Download JSON</Button>
+								<Box display="flex" flexWrap="wrap">
+									<Box display="flex" flexWrap="wrap">
+										<Box>
+											<Button onClick={this.downloadModelOBJ} color="primary">Download OBJ</Button>
+										</Box>
+										<Box>
+											<Button onClick={this.downloadModelGLB} color="primary">Download GLTF</Button>
+										</Box>
+										<Box>
+											<Button onClick={this.downloadModelSTL} color="primary">Download STL</Button>
+										</Box>
+										<Box>
+											<Button onClick={this.downloadJSON} color="primary">Download JSON</Button>
+										</Box>
+									</Box>
+									<Box>
+										<Button onClick={this.downloadZip} color="primary">Download ZIP</Button>
+									</Box>
+								</Box>
 							</ExpansionPanelDetails>
 						</ExpansionPanel></React.Fragment> : null}
 

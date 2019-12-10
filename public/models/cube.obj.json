@@ -1,53 +1,63 @@
 {
-	"model_id": "cube0",
-	"face_number": 6,
-	"faces": [
-		{
-		 "title": "Front Face",
-		 "material_id": "wall1",
-		 "min_extrude": -256,
-		 "max_extrude": 256,
-		 "min_res": 0,
-		 "max_res": 9
-		},
-		{
-		 "title": "Back Face",
-		 "material_id": "wall2",
-		 "min_extrude": -256,
-		 "max_extrude": 256,
-		 "min_res": 0,
-		 "max_res": 9
-		},
-		{
-		 "title": "Left Face",
-		 "material_id": "wall3",
-		 "min_extrude": -256,
-		 "max_extrude": 256,
-		 "min_res": 0,
-		 "max_res": 9
-		},
-		{
-		 "title": "Right Face",
-		 "material_id": "wall4",
-		 "min_extrude": -256,
-		 "max_extrude": 256,
-		 "min_res": 0,
-		 "max_res": 9
-		},
-		{
-		 "title": "Top Face",
-		 "material_id": "wall5",
-		 "min_extrude": -256,
-		 "max_extrude": 256,
-		 "min_res": 0,
-		 "max_res": 9
-		},
-		{
-		 "title": "Bottom Face",
-		 "material_id": "wall6",
-		 "min_extrude": -256,
-		 "max_extrude": 256,
-		 "min_res": 0,
-		 "max_res": 9
-		}]
+    "Surface: 0" : {
+        "title" : "Surface #1",
+		"exclude" : false,
+        "low_div_rate" : 15,
+        "med_div_rate" : 16,
+        "high_div_rate" : 17,
+        "ultra_div_rate" : 18,
+        "min_extrusion_rate" : -10,
+        "max_extrusion_rate" : 10
+    },
+	"Surface: 1" : {
+        "title" : "Surface #2",
+		"exclude" : false,
+        "low_div_rate" : 15,
+        "med_div_rate" : 16,
+        "high_div_rate" : 17,
+        "ultra_div_rate" : 18,
+        "min_extrusion_rate" : -10,
+        "max_extrusion_rate" : 10
+    },
+	"Surface: 2" : {
+        "title" : "Surface #3",
+		"exclude" : false,
+        "low_div_rate" : 15,
+        "med_div_rate" : 16,
+        "high_div_rate" : 17,
+        "ultra_div_rate" : 18,
+        "min_extrusion_rate" : -10,
+        "max_extrusion_rate" : 10
+    },
+	"Surface: 3" : {
+        "title" : "Surface #4",
+		"exclude" : false,
+        "low_div_rate" : 15,
+        "med_div_rate" : 16,
+        "high_div_rate" : 17,
+        "ultra_div_rate" : 18,
+        "min_extrusion_rate" : -10,
+        "max_extrusion_rate" : 10
+    },
+	"Surface: 4" : {
+        "title" : "Surface #5",
+		"exclude" : false,
+        "low_div_rate" : 15,
+        "med_div_rate" : 16,
+        "high_div_rate" : 17,
+        "ultra_div_rate" : 18,
+        "min_extrusion_rate" : -10,
+        "max_extrusion_rate" : 10
+    },
+	"Surface: 5" : {
+        "title" : "Surface #6",
+		"exclude" : false,
+        "low_div_rate" : 15,
+        "med_div_rate" : 16,
+        "high_div_rate" : 17,
+        "ultra_div_rate" : 18,
+        "min_extrusion_rate" : -10,
+        "max_extrusion_rate" : 10
+    }
+
 }
