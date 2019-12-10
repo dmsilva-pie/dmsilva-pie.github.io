@@ -102,7 +102,7 @@ LITHO3D.downloadZip
 ...
 ```
 
-Para efeitos de integração, as seguintes métodos poderão ter utilidade:
+Para efeitos de integração, os seguintes métodos poderão ter utilidade:
 
 ```
 LITHO3D.getResourceURL
