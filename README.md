@@ -1,4 +1,4 @@
-## Lithographic 3D customization tool
+## Litho 3D customization tool
 #### Testing page for 3DPrint - [dmsilva-pie.github.io](https://dmsilva-pie.github.io/build/)
 
 Esta página está disponibilizada para efeito de testes ligeiros e partilha de código.
