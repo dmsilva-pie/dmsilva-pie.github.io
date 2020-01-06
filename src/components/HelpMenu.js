@@ -55,6 +55,7 @@ const helpSectionArray = [
         'You can manipulate the appearance of each individual customizable surface in the "Edit Surfaces" tab of the toolbar.',
         "In this tab you can see all the surfaces (if any) that can be edited. Click or drag images to the squares with the add prompt in order to have that image imprinted on the surface!",
         'You can then change parameters of this imprinting via the menus assigned to each surface. "Move/Rotate" will allow you to change the positioning of the imprinting, while "Volume" will allow you to change the extrusion properties of the surface.',
+        'If the image you are trying to add is already an UV mapped texture built for the model, you can forgo the automatic correction by deselecting the "Auto Correct" option on the "Move/Rotate" submenu.',
         'Selecting "Clear" will allow you remove that image/imprinting, while the checkmark allows you to hide or show the changes. Hidden changes will not affect the final model mesh.'
 
     ]

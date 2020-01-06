@@ -65,9 +65,9 @@ export default function SurfaceList(props) {
 			case "ultra":
 				return isMobile ? surface.med + 1 : surface.med + 2;
 			case "min":
-				return -10;
+				return -5;
 			case "max":
-				return 10;
+				return 5;
 			default:
 				return 0;
 		}
@@ -103,6 +103,7 @@ export default function SurfaceList(props) {
 									def_ref={surface.reference ? surface.reference : "positive"}
 									def_state={surface.hasOwnProperty("state") ? surface.state : true}
 									def_img_url={surface.img_url ? surface.img_url : null}
+									def_surf_asp={surface.hasOwnProperty("surfaceAspectEnabled") ? surface.surfaceAspectEnabled : true}
 									loading={props.loading}
 									warningFunc={props.warningFunc}
 								/>

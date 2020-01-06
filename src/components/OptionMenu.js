@@ -135,10 +135,12 @@ export default class OptionMenu extends Component {
 				if (format === undefined) format = "obj";
 				var isUpload = this.state.model_type === window.LITHO3D.MODELTYPES.UPLOAD;
 
+				this.emitWarningMessage("Loading model...", 60000);
 				window.LITHO3D.loadModel(this.state.model_uri, format, this.state.model_type, this.state.color)
 					.then(surfaces => {
 						this.setState({ isUpload: isUpload, isUploadDialogOpen: false, surfaceList: surfaces },
 							this.props.loadingToggle(false));
+						this.emitWarningMessage("Model loaded.", 1000);
 					})
 					.catch(err => {
 						this.setState({ isUpload: isUpload, isUploadDialogOpen: isUpload });
@@ -233,18 +235,20 @@ export default class OptionMenu extends Component {
 	/** Process the upload of a model file or zip */
 	handleUploaderSave(files) {
 		if (files.length > 0) {
-			if (files[0].extension !== "zip") {
+			if (files[0].extension !== "7z") {
 
 				var uploadedModel = URL.createObjectURL(files[0]);
 
 				this.setState({ isUploadDialogOpen: false }, () => {
 					this.props.loadingToggle(true);
+					this.emitWarningMessage("Loading model...", 60000);
 					window.LITHO3D.loadModel(uploadedModel, files[0].extension, this.state.model_type, this.state.color)
 						.then(surfaces => {
 							this.setState({ surfaceList: [], model_def_uri: "" }, () => {
 								if (this.state.uploadedModel) URL.revokeObjectURL(this.state.uploadedModel);
 								this.setState({ surfaceList: surfaces, uploadedModel: uploadedModel },
 									this.props.loadingToggle(false));
+								this.emitWarningMessage("Model loaded.", 1000);
 							});
 						})
 						.catch(err => {
@@ -256,7 +260,7 @@ export default class OptionMenu extends Component {
 						});
 				});
 			}
-			else if (files[0].extension === "zip") {
+			else if (files[0].extension === "7z") {
 				this.setState({ isUploadDialogOpen: false }, () => {
 					this.props.loadingToggle(true);
 					this.emitWarningMessage("Unpacking zip file. Loading...", 60000);
@@ -365,7 +369,7 @@ export default class OptionMenu extends Component {
 								className='files-dropzone'
 								onChange={this.handleUploaderSave}
 								onError={this.handleUploaderError}
-								accepts={['.obj', '.glb', '.zip']}
+								accepts={['.obj', '.glb', '.7z']}
 								multiple={false}
 								maxFiles={1}
 								maxFileSize={100000000}

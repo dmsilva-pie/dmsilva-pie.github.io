@@ -1,6 +1,6 @@
 import React, { Component } from 'react';
 import Files from 'react-files';
-import { debounce } from 'lodash';
+import { debounce, throttle } from 'lodash';
 import { withStyles } from '@material-ui/core/styles';
 
 import Box from '@material-ui/core/Box';
@@ -99,6 +99,7 @@ export default class SurfaceListItem extends Component {
 			transY: this.props.def_transY,
 			scaleX: this.props.def_scaleX,
 			scaleY: this.props.def_scaleY,
+			surfaceAspectEnabled: this.props.def_surf_asp,
 			rotation: this.props.def_rotation
 		};
 
@@ -111,14 +112,15 @@ export default class SurfaceListItem extends Component {
 		this.onImageAdd = this.onImageAdd.bind(this);
 		this.onImageAddError = this.onImageAddError.bind(this);
 		this.onImageRemove = this.onImageRemove.bind(this);
-		this.handleScaleChange = debounce(this.handleScaleSliderChange.bind(this), this.props.isMobile ? 200 : 50);
+		this.handleScaleChange = debounce(this.handleScaleSliderChange.bind(this), this.props.isMobile ? 150 : 50);
 		this.handleResolutionChange = this.handleResolutionChange.bind(this);
 		this.handleRefTypeChange = this.handleRefTypeChange.bind(this);
-		this.handleTextureTransXChange = debounce(this.handleTextureTransXChange.bind(this), this.props.isMobile ? 200 : 10);
-		this.handleTextureTransYChange = debounce(this.handleTextureTransYChange.bind(this), this.props.isMobile ? 200 : 10);
-		this.handleTextureScaleXChange = debounce(this.handleTextureScaleXChange.bind(this), this.props.isMobile ? 200 : 10);
-		this.handleTextureScaleYChange = debounce(this.handleTextureScaleYChange.bind(this), this.props.isMobile ? 200 : 10);
-		this.handleTextureRotationChange = debounce(this.handleTextureRotationChange.bind(this), this.props.isMobile ? 200 : 10);
+		this.handleTextureSARChange = this.handleTextureSARChange.bind(this);
+		this.handleTextureTransXChange = throttle(this.handleTextureTransXChange.bind(this), this.props.isMobile ? 150 : 50);
+		this.handleTextureTransYChange = throttle(this.handleTextureTransYChange.bind(this), this.props.isMobile ? 150 : 50);
+		this.handleTextureScaleXChange = throttle(this.handleTextureScaleXChange.bind(this), this.props.isMobile ? 150 : 50);
+		this.handleTextureScaleYChange = throttle(this.handleTextureScaleYChange.bind(this), this.props.isMobile ? 150 : 50);
+		this.handleTextureRotationChange = throttle(this.handleTextureRotationChange.bind(this), this.props.isMobile ? 150 : 50);
 		this.handleTexturePositionReset = this.handleTexturePositionReset.bind(this);
 		this.formatSliderScaling = this.formatSliderScaling.bind(this);
 		this.formatSliderRotation = this.formatSliderRotation.bind(this);
@@ -144,30 +146,35 @@ export default class SurfaceListItem extends Component {
 
 	onImageAdd(file) {
 		if (file.length > 0) {
-			if(this.props.isMobile)
-				this.props.warningFunc("Adding image to surface...", 30000);
+			this.props.warningFunc("Adding image to surface...", 30000);
 			this.props.loading(true);
 
 			var imgURL = URL.createObjectURL(file[0]);
 
 			window.LITHO3D.addReference(this.props.index, imgURL, this.state.resolution, this.state.scale)
-			.then(() => {
-				if (this.state.img_url !== "" && this.state.img_url !== window.LITHO3D.placeholderImage(this.props.index)) 
-					URL.revokeObjectURL(this.state.img_url);
-				
-				this.setState({ img_url: imgURL, img_file: file[0], enabled: true }, () => {
+				.then(() => {
+					if (this.state.img_url !== "" && this.state.img_url !== window.LITHO3D.placeholderImage(this.props.index))
+						URL.revokeObjectURL(this.state.img_url);
+
+					this.setState({ img_url: imgURL, img_file: file[0], enabled: true}, () => {
+						this.refs.files.setState({ files: [] });
+
+						//If the name of the texture matches the surface id, we treat it as being UV mapped by default.
+						var filename = file[0].name.substring(0, file[0].name.lastIndexOf('.'));
+						if(filename === this.props.title){
+							this.setState({surfaceAspectEnabled: false}, ()=>{
+								window.LITHO3D.changeReferencePosition(this.props.index, this.state.transX, this.state.transY, 1 / this.state.scaleX, 1 / this.state.scaleY, this.state.rotation, this.state.surfaceAspectEnabled, this.state.scale)});
+						}
+						this.props.loading(false);
+						this.props.warningFunc("New image reference was set.", 1000);
+					});
+				})
+				.catch(err => {
+					this.props.warningFunc(err.message);
+					URL.revokeObjectURL(imgURL);
 					this.refs.files.setState({ files: [] });
 					this.props.loading(false);
-					if(this.props.isMobile)
-						this.props.warningFunc("New image reference was set.", 500);
 				});
-			})
-			.catch(err => {
-				this.props.warningFunc(err);
-				URL.revokeObjectURL(imgURL);
-				this.refs.files.setState({ files: [] });
-				this.props.loading(false);
-			});
 		}
 	}
 
@@ -177,30 +184,30 @@ export default class SurfaceListItem extends Component {
 
 	onImageRemove() {
 		window.LITHO3D.removeReference(this.props.index)
-		.then(() => {
-			if (this.state.img_url !== "" && this.state.img_url !== window.LITHO3D.placeholderImage(this.props.index)) 
-				URL.revokeObjectURL(this.state.img_url);
-			this.setState({
-				img_url: window.LITHO3D.placeholderImage(this.props.index), img_file: null, enabled: false, usable: true,
-				scale: this.props.def_ext !== null ? this.props.def_ext : this.DEFAULT_SCALE, 
-				resolution: this.props.def_res !== null ? this.props.def_res : this.DEFAULT_RES
-			}, () => {
+			.then(() => {
+				if (this.state.img_url !== "" && this.state.img_url !== window.LITHO3D.placeholderImage(this.props.index))
+					URL.revokeObjectURL(this.state.img_url);
+				this.setState({
+					img_url: window.LITHO3D.placeholderImage(this.props.index), img_file: null, enabled: false, usable: true,
+					scale: this.props.def_ext !== null ? this.props.def_ext : this.DEFAULT_SCALE,
+					resolution: this.props.def_res !== null ? this.props.def_res : this.DEFAULT_RES
+				}, () => {
+					this.refs.files.setState({ files: [] });
+					this.props.loading(false);
+				});
+			})
+			.catch(err => {
+				this.props.warningFunc(err.message);
 				this.refs.files.setState({ files: [] });
 				this.props.loading(false);
 			});
-		})
-		.catch(err => {
-			this.props.warningFunc(err);
-			this.refs.files.setState({ files: [] });
-			this.props.loading(false);
-		});
 	}
 
 	handleCheck(event) {
 		if (this.state.usable !== event.target.checked) {
 			var checked = this.state.usable;
 			this.props.loading(true);
-			if(window.LITHO3D.changeReferenceState(this.props.index, !checked, this.state.scale)){
+			if (window.LITHO3D.changeReferenceState(this.props.index, !checked, this.state.scale)) {
 				this.setState({ usable: !checked }, () => {
 					this.props.loading(false);
 				});
@@ -212,7 +219,7 @@ export default class SurfaceListItem extends Component {
 	handleScaleSliderChange(event, newValue) {
 		if (this.state.scale !== newValue) {
 			this.props.loading(true);
-			if(window.LITHO3D.applyReference(this.props.index, newValue)){
+			if (window.LITHO3D.applyReference(this.props.index, newValue)) {
 				this.setState({ scale: newValue }, () => {
 					this.props.loading(false);
 				});
@@ -223,24 +230,26 @@ export default class SurfaceListItem extends Component {
 
 	handleResolutionChange(event, newValue) {
 		if (this.state.resolution !== newValue) {
-			if(this.props.isMobile)
-				this.props.warningFunc("Changing model resolution...", 10000);
+			this.props.warningFunc("Changing model resolution...", 10000);
 			this.props.loading(true);
 			window.LITHO3D.updateSurface(this.props.index, newValue, this.state.scale)
-			.then(() => {
-				this.setState({ resolution: newValue }, () => {
+				.then(() => {
+					this.setState({ resolution: newValue }, () => {
+						this.props.loading(false);
+						this.props.warningFunc("New resolution was set.", 1000);
+					});
+				})
+				.catch(err => {
+					this.props.warningFunc(err.message);
 					this.props.loading(false);
-					if(this.props.isMobile)
-						this.props.warningFunc("New resolution was set.", 500);
 				});
-			});
 		}
 	}
 
 	handleRefTypeChange(event, newValue) {
 		if (this.state.reference !== newValue) {
 			this.props.loading(true);
-			if(window.LITHO3D.changeReferenceType(this.props.index, newValue, this.state.scale)){
+			if (window.LITHO3D.changeReferenceType(this.props.index, newValue, this.state.scale)) {
 				this.setState({ reference: newValue }, () => {
 					this.props.loading(false);
 				});
@@ -249,73 +258,98 @@ export default class SurfaceListItem extends Component {
 		}
 	}
 
-	handleTextureTransXChange(e, newValue){
+	handleTextureSARChange(event) {
+		if (this.state.surfaceAspectEnabled !== event.target.checked) {
+			var checked = this.state.surfaceAspectEnabled;
+			this.props.loading(true);
+			this.setState({ surfaceAspectEnabled: event.target.checked }, () => {
+				if (window.LITHO3D.changeReferencePosition(this.props.index, this.state.transX, this.state.transY, 1 / this.state.scaleX, 1 / this.state.scaleY, this.state.rotation, this.state.surfaceAspectEnabled, this.state.scale))
+					this.props.loading(false);
+				else
+					this.setState({ surfaceAspectEnabled: checked }, () => {
+						this.props.loading(false)
+					});
+			});
+		}
+	};
+	handleTextureTransXChange(e, newValue) {
 		if (this.state.transX !== newValue) {
 			var oldValue = this.state.transX;
+			this.props.loading(true);
 			this.setState({ transX: newValue }, () => {
-				if(window.LITHO3D.changeReferencePosition(this.props.index, this.state.transX, this.state.transY, 1 / this.state.scaleX, 1 / this.state.scaleY, this.state.rotation, this.state.scale))
-						this.props.loading(false);
-				else 
+				if (window.LITHO3D.changeReferencePosition(this.props.index, this.state.transX, this.state.transY, 1 / this.state.scaleX, 1 / this.state.scaleY, this.state.rotation, this.state.surfaceAspectEnabled, this.state.scale))
+					this.props.loading(false);
+				else
 					this.setState({ transX: oldValue }, () => {
-						this.props.loading(false)});
+						this.props.loading(false)
+					});
 			});
 		}
 	}
-	handleTextureTransYChange(e, newValue){
+	handleTextureTransYChange(e, newValue) {
 		if (this.state.transY !== newValue) {
 			var oldValue = this.state.transY;
+			this.props.loading(true);
 			this.setState({ transY: newValue }, () => {
-				if(window.LITHO3D.changeReferencePosition(this.props.index, this.state.transX, this.state.transY, 1 / this.state.scaleX, 1 / this.state.scaleY, this.state.rotation, this.state.scale))
-						this.props.loading(false);
-				else 
+				if (window.LITHO3D.changeReferencePosition(this.props.index, this.state.transX, this.state.transY, 1 / this.state.scaleX, 1 / this.state.scaleY, this.state.rotation, this.state.surfaceAspectEnabled, this.state.scale))
+					this.props.loading(false);
+				else
 					this.setState({ transY: oldValue }, () => {
-						this.props.loading(false)});
+						this.props.loading(false)
+					});
 			});
 		}
 	}
-	handleTextureScaleXChange(e, newValue){
+	handleTextureScaleXChange(e, newValue) {
 		if (this.state.scaleX !== newValue) {
 			var oldValue = this.state.scaleX;
+			this.props.loading(true);
 			this.setState({ scaleX: newValue }, () => {
-				if(window.LITHO3D.changeReferencePosition(this.props.index, this.state.transX, this.state.transY, 1 / this.state.scaleX, 1 / this.state.scaleY, this.state.rotation, this.state.scale))
-						this.props.loading(false);
-				else 
+				if (window.LITHO3D.changeReferencePosition(this.props.index, this.state.transX, this.state.transY, 1 / this.state.scaleX, 1 / this.state.scaleY, this.state.rotation, this.state.surfaceAspectEnabled, this.state.scale))
+					this.props.loading(false);
+				else
 					this.setState({ scaleX: oldValue }, () => {
-						this.props.loading(false)});
+						this.props.loading(false)
+					});
 			});
 		}
 	}
-	handleTextureScaleYChange(e, newValue){
+	handleTextureScaleYChange(e, newValue) {
 		if (this.state.scaleY !== newValue) {
 			var oldValue = this.state.scaleY;
+			this.props.loading(true);
 			this.setState({ scaleY: newValue }, () => {
-				if(window.LITHO3D.changeReferencePosition(this.props.index, this.state.transX, this.state.transY, 1 / this.state.scaleX, 1 / this.state.scaleY, this.state.rotation, this.state.scale))
-						this.props.loading(false);
-				else 
+				if (window.LITHO3D.changeReferencePosition(this.props.index, this.state.transX, this.state.transY, 1 / this.state.scaleX, 1 / this.state.scaleY, this.state.rotation, this.state.surfaceAspectEnabled, this.state.scale))
+					this.props.loading(false);
+				else
 					this.setState({ scaleY: oldValue }, () => {
-						this.props.loading(false)});
+						this.props.loading(false)
+					});
 			});
 		}
 	}
-	handleTextureRotationChange(e, newValue){
+	handleTextureRotationChange(e, newValue) {
 		if (this.state.rotation !== newValue) {
 			var oldValue = this.state.rotation;
+			this.props.loading(true);
 			this.setState({ rotation: newValue }, () => {
-				if(window.LITHO3D.changeReferencePosition(this.props.index, this.state.transX, this.state.transY, 1 / this.state.scaleX, 1 / this.state.scaleY, this.state.rotation, this.state.scale))
-						this.props.loading(false);
-				else 
+				if (window.LITHO3D.changeReferencePosition(this.props.index, this.state.transX, this.state.transY, 1 / this.state.scaleX, 1 / this.state.scaleY, this.state.rotation, this.state.surfaceAspectEnabled, this.state.scale))
+					this.props.loading(false);
+				else
 					this.setState({ rotation: oldValue }, () => {
-						this.props.loading(false)});
+						this.props.loading(false)
+					});
 			});
 		}
 	}
 
 	handleTexturePositionReset(event) {
-		if(window.LITHO3D.changeReferencePosition(this.props.index, 0,0,1,1,0,this.state.scale)
-		){
-			this.setState({ transX: 0, transY: 0, scaleX: 1, scaleY: 1, rotation: 0 }, 
-				() => { this.props.loading(false);
-			});
+		if (window.LITHO3D.changeReferencePosition(this.props.index, 0, 0, 1, 1, 0, this.state.surfaceAspectEnabled, this.state.scale)
+		) {
+			this.setState({ transX: 0, transY: 0, scaleX: 1, scaleY: 1, rotation: 0 },
+				() => {
+					this.props.loading(false);
+				});
 		}
 	}
 
@@ -419,7 +453,7 @@ export default class SurfaceListItem extends Component {
 													value={this.state.transX}
 													aria-labelledby="discrete-slider"
 													valueLabelDisplay="auto"
-													step={this.props.isMobile? 0.05 : 0.02}
+													step={this.props.isMobile ? 0.1 : 0.05}
 													marks
 													min={-1.5}
 													max={1.5}
@@ -430,7 +464,7 @@ export default class SurfaceListItem extends Component {
 													value={this.state.transY}
 													aria-labelledby="discrete-slider"
 													valueLabelDisplay="auto"
-													step={this.props.isMobile? 0.05 : 0.02}
+													step={this.props.isMobile ? 0.1 : 0.05}
 													marks
 													min={-1.5}
 													max={1.5}
@@ -442,7 +476,7 @@ export default class SurfaceListItem extends Component {
 													aria-labelledby="discrete-slider"
 													valueLabelDisplay="auto"
 													valueLabelFormat={this.formatSliderScaling}
-													step={this.props.isMobile? 0.05 : 0.02}
+													step={this.props.isMobile ? 0.1 : 0.05}
 													marks
 													min={0.05}
 													max={1.95}
@@ -454,7 +488,7 @@ export default class SurfaceListItem extends Component {
 													aria-labelledby="discrete-slider"
 													valueLabelDisplay="auto"
 													valueLabelFormat={this.formatSliderScaling}
-													step={this.props.isMobile? 0.05 : 0.02}
+													step={this.props.isMobile ? 0.1 : 0.05}
 													marks
 													min={0.005}
 													max={2.005}
@@ -471,6 +505,12 @@ export default class SurfaceListItem extends Component {
 													min={-Math.PI}
 													max={Math.PI}
 												/>
+												<Tooltip title={<div>Automatically corrects aspect ratio based on surface.<br />Disable if using textures that are already UV mapped.</div>} enterDelay={100}>
+													<Box display="flex" alignItems="center" justifyContent="center" ml={-1} pb={1}>
+														<Checkbox checked={this.state.surfaceAspectEnabled} onChange={this.handleTextureSARChange} />
+														<Typography>Auto Correct</Typography>
+													</Box>
+												</Tooltip>
 												<Button variant="contained" onClick={this.handleTexturePositionReset}>
 													Reset
 								  				</Button>
@@ -545,7 +585,7 @@ export default class SurfaceListItem extends Component {
 														defaultValue={this.state.scale}
 														aria-labelledby="discrete-slider"
 														valueLabelDisplay="auto"
-														step={1}
+														step={0.5}
 														marks
 														min={this.props.min_ext}
 														max={this.props.max_ext}

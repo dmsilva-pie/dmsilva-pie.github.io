@@ -1,6 +1,6 @@
 /* 
  * *
- * * Lithographic 3D customization tool v1.8.0
+ * * Litho 3D customization tool v1.8.0
  * *
  * * Aplication for the customization and visualization of 3D models.
  * * Using reference images, it facilitates model personalization.
@@ -49,7 +49,7 @@ var LITHO3D = (function () {
         surfaces = [], surfaces_map = {},
         og_surfaces = [], curr_surfaces = [],
         og_surface_borders = [], curr_surface_borders = [],
-        surfaceAspectRatios = [];
+        curr_sharp_vertex = [], surfaceAspectRatios = [];
 
     var scaleFactor = 1; //How much scaling to normalize mesh size.
     var translateFactor = { x: 0, y: 0, z: 0 }; //How much translation to center objects.
@@ -78,6 +78,9 @@ var LITHO3D = (function () {
     var modelURL = "";
     var jsonURL = "";
     var imageURLs = [];
+
+    /* Reusable orkers */
+    var tesselationWorker = window.Worker ? new Worker('./libs/tesselateWorker.js') : null;
 
 
     /** Constants */
@@ -117,8 +120,6 @@ var LITHO3D = (function () {
 
     const IS_MOBILE = (/Mobi|Android/i.test(navigator.userAgent));
 
-
-
     /*** SETUP METHODS ***/
 
     /**
@@ -139,7 +140,7 @@ var LITHO3D = (function () {
         camera.up.set(0, 1, 0);
         camera.position.set(300, 20, 0);
         camera.add(new THREE.PointLight(0xffffff, 0.8));
-
+;
         //Scene
         scene = new THREE.Scene();
         scene.add(camera);
@@ -147,6 +148,10 @@ var LITHO3D = (function () {
         helper = new THREE.GridHelper(260, 20, 0xFF5555, 0xF0F0F0);
         helper.position.y = -50;
         scene.add(helper);
+
+        var directionalLight = new THREE.DirectionalLight( 0xffffff, 0.4 );
+        directionalLight.position.set(0,1,0);
+        scene.add( directionalLight );
 
         renderer = new THREE.WebGLRenderer({ alpha: true });
         renderer.setPixelRatio(window.devicePixelRatio);
@@ -160,7 +165,7 @@ var LITHO3D = (function () {
         controls.addEventListener('change', render);
         controls.target.set(0, 1.2, 2);
         controls.minPolarAngle = 0.05;
-        controls.maxPolarAngle = 1.75;
+        controls.maxPolarAngle = 2.00;
         controls.minDistance = 60;
         controls.maxDistance = 450;
         controls.update();
@@ -243,6 +248,8 @@ var LITHO3D = (function () {
 
         surfaceAspectRatios = [];
 
+        curr_sharp_vertex = [];
+
         lodState = [];
         scaleState = [];
         surfaceState = [];
@@ -267,10 +274,9 @@ var LITHO3D = (function () {
 
         return new Promise((resolve, reject) => {
 
-            if (group_root) {
-                //Reset model data and scene, memory management
+            //Reset model data and scene, memory management
+            if (group_root)
                 resetScene();
-            }
 
             //Intended returned data with surface details. Used for interface initialization.
             var surfaceList = [];
@@ -306,8 +312,10 @@ var LITHO3D = (function () {
                 object.traverse(function (child) {
                     if (child instanceof THREE.Mesh) {
 
+                        //Dispose of unecessary duplicate data that doesn't contribute to extrusion.
                         var indexedGeometry = THREE.BufferGeometryUtils.mergeVertices(child.geometry);
                         child.geometry.dispose();
+                        smoothDuplicateVertexes(indexedGeometry);
                         child.geometry = indexedGeometry;
 
                         //Find normalization factor components
@@ -341,7 +349,7 @@ var LITHO3D = (function () {
 
                             //Determine medium detail level based on desired threshold
                             for (var medAmount = 0; ; medAmount++)
-                                if (amount * Math.pow(2, medAmount) >= MIN_MED_THRESHOLD)
+                                if (child.geometry.index.count / 3 * Math.pow(2, medAmount) >= MIN_MED_THRESHOLD)
                                     break;
 
                             //We deal with customizable surface reference storage
@@ -367,12 +375,16 @@ var LITHO3D = (function () {
                             positionState.push([0, 0, 1, 1, 0]);
                             refType.push(REF_TYPE.POSITIVE);
 
-                            curr_surface_borders.push({});
-                            og_surface_borders.push({});
+                            curr_surface_borders.push(new Map());
+                            og_surface_borders.push(new Map());
                             generateBorderTable(surfaceCount, child.geometry);
 
-                            surfaceAspectRatios.push({ w: 1, h: 1 });
+                            //Compute surface aspect ratio. Can be ignored for UV mapped textures/references.
+                            surfaceAspectRatios.push({ w: 1, h: 1, enabled: true });
                             calculateSurfaceAspectRatio(surfaceCount, child.geometry);
+
+                            //We find the "sharp" vertexes, aka the vertexes that share position values but difer in texture or normal info.
+                            curr_sharp_vertex.push(new Map());
 
                             surfaceCount++;
                         }
@@ -403,10 +415,12 @@ var LITHO3D = (function () {
                     reflectivity: 0.1,
                     shininess: 30
                 });
-                wireMaterial = new THREE.MeshBasicMaterial({
+                wireMaterial = new THREE.MeshPhongMaterial({
                     color: color,
                     wireframe: true
                 });
+
+                surfaceCount = 0;
 
                 object.traverse(function (child) {
                     if (child instanceof THREE.Mesh) {
@@ -427,8 +441,12 @@ var LITHO3D = (function () {
                         //One is the currently used one for calculation purposes. 
                         //The other is a fallback backup that safeguards the original morphology.
                         if (!MODEL_ID.includes(child.name) && child.geometry.getAttribute("uv") !== null) {
-                            curr_surfaces.push(child.geometry);
+                            findSharpVertexes(surfaceCount, child.geometry);
+
+                            curr_surfaces.push(child.geometry.clone());
                             og_surfaces.push(child.geometry.clone());
+
+                            surfaceCount++;
                         }
                     }
                 });
@@ -440,6 +458,10 @@ var LITHO3D = (function () {
                 modelType = type;
                 modelFormat = format;
                 modelURL = uri;
+
+                //If viewer mode is diferent from previous model, enforce it.
+                if (viewerMode !== VIEWMODES.COLOR)
+                    changeViewMode(viewerMode);
 
                 resolve(surfaceList);
 
@@ -490,6 +512,212 @@ var LITHO3D = (function () {
                 }
             }
         });
+    }
+
+    function smoothDuplicateVertexes(geometry) {
+
+        //Merge vertices with same position and UV data, interpolating normals.
+
+        var positions = geometry.getAttribute("position");
+        var normals = geometry.getAttribute("normal");
+        var uvs = geometry.getAttribute("uv");
+        var indexes = geometry.index;
+
+        var table = new Map();
+
+        //Build map with buckets of indexes with the same position
+        for (var i = 0; i < positions.count; i++) {
+            var pos = positions.array[(i * 3)] + ":" + positions.array[(i * 3) + 1] + ":" + positions.array[(i * 3) + 2];
+
+            if (!table.has(pos))
+                table.set(pos, [i]);
+            else
+                table.get(pos).push(i);
+        }
+
+        var replacementIndexTable = new Map();
+        var newPositions = [];
+        var newNormals = [];
+        var newUVS = [];
+        var newIndexes = new Uint32Array(indexes.count);
+        var currentIndex = 0;
+
+        table.forEach((values, key) => {
+
+            var uvDupeTable = new Map();
+
+            //Separate vertexes of same position by diferent UV values (maintain texture edge cases)
+            values.forEach((index, key) => {
+
+                var uv = uvs.array[(index * 2)] + ":" + uvs.array[(index * 2) + 1];
+
+                if (!uvDupeTable.has(uv))
+                    uvDupeTable.set(uv, [index]);
+                else
+                    uvDupeTable.get(uv).push(index);
+
+            });
+
+            //Interpolate duplicate position vertex normals.
+            var normal = [0, 0, 0];
+
+            values.forEach(index => {
+                normal[0] += normals.array[(index * 3)];
+                normal[1] += normals.array[(index * 3) + 1];
+                normal[2] += normals.array[(index * 3) + 2];
+            });
+            normal[0] = normal[0] / values.length;
+            normal[1] = normal[1] / values.length;
+            normal[2] = normal[2] / values.length;
+
+            //Construct new geometry attributes, merging vertexes with same position and UV.
+            uvDupeTable.forEach((dupes, key) => {
+
+                dupes.forEach(index => {
+                    replacementIndexTable.set(index, currentIndex);
+                });
+
+                newPositions.push(positions.array[(dupes[0] * 3)], positions.array[(dupes[0] * 3) + 1], positions.array[(dupes[0] * 3) + 2]);
+                newNormals.push(normal[0], normal[1], normal[2]);
+                newUVS.push(uvs.array[(dupes[0] * 2)], uvs.array[(dupes[0] * 2) + 1]);
+                currentIndex++;
+            });
+
+        });
+
+        for (var i = 0; i < newIndexes.length; i++)
+            newIndexes[i] = replacementIndexTable.get(indexes.array[i]);
+
+        newPositions = Float32Array.from(newPositions);
+        newNormals = Float32Array.from(newNormals);
+        newUVS = Float32Array.from(newUVS);
+
+        geometry.addAttribute("position", new THREE.BufferAttribute(newPositions, 3, false));
+        geometry.addAttribute("normal", new THREE.BufferAttribute(newNormals, 3, false));
+        geometry.addAttribute("uv", new THREE.BufferAttribute(newUVS, 2, false));
+        geometry.setIndex(new THREE.BufferAttribute(newIndexes, 1, false));
+        geometry.index.needsUpdate = true;
+        geometry.needsUpdate = true;
+    }
+
+    function findSharpVertexes(index, geometry) {
+
+        //We find all vertexes that belong to sharp edges, ie those that occupy same positions but difer in normals/uvs.
+        //This is necessary to diferentiate between face group borders and surface borders.
+        //It's also helpful to handle surface update special cases.
+
+        if (!curr_sharp_vertex[index])
+            return;
+
+        //Map of vertex index -> Array[ boolean if special case, normal x, normal y, normal z, duplicate indexes...]
+        curr_sharp_vertex[index] = new Map();
+
+        var position = geometry.getAttribute("position");
+        var array = position.array;
+
+        var table = new Map();
+
+        curr_surface_borders[index].forEach((values, i) => {
+            var pos = array[(i * 3)] + ":" + array[(i * 3) + 1] + ":" + array[(i * 3) + 2];
+
+            if (!table.has(pos))
+                table.set(pos, [i]);
+            else
+                table.get(pos).push(i);
+        });
+
+        var normals = geometry.getAttribute("normal");
+
+        table.forEach((values, key) => {
+            if (values.length > 1) {
+
+                //Derive normal from average of duplicate position vertexes
+                var derivedNormal = [false, 0, 0, 0];
+                values.forEach(vertex => {
+                    derivedNormal[1] += normals.array[(vertex * 3)];
+                    derivedNormal[2] += normals.array[(vertex * 3) + 1];
+                    derivedNormal[3] += normals.array[(vertex * 3) + 2];
+                });
+                derivedNormal[1] = derivedNormal[1] / values.length;
+                derivedNormal[2] = derivedNormal[2] / values.length;
+                derivedNormal[3] = derivedNormal[3] / values.length;
+
+                //Add entries with array of derived normal values, followed by duplicate index list
+                values.forEach(vertex => {
+                    var duplicates = values.filter(v => v !== vertex);
+                    var valueArray = derivedNormal.concat(duplicates);
+                    curr_sharp_vertex[index].set(vertex, valueArray);
+                });
+            }
+        });
+
+        //Special case, a sharp edge that is divided on one side by interpolated vertex.
+        //In edges [A1-B1, A2-C-B2], with A1/A2 and B1/B2 being vertexes at the same positions, and A1-C being colinear and contained within A1-B1:
+        //C must also be considered a "sharp vertex", despite not having any duplicates.
+        curr_surface_borders[index].forEach((neighbors, vertexIndex) => {
+
+            if (!curr_sharp_vertex[index].has(vertexIndex)) {
+                var found = false;
+
+                neighbors.forEach(neighborVertex => {
+                    if (found) return;
+
+                    if (curr_sharp_vertex[index].has(neighborVertex)) {
+
+                        var neighborDupes = curr_sharp_vertex[index].get(neighborVertex).slice(4);
+
+                        neighborDupes.forEach(neighborDupeVertex => {
+                            if (found) return;
+
+                            if (curr_surface_borders[index].has(neighborDupeVertex)) {
+
+                                var neighbors2 = curr_surface_borders[index].get(vertexIndex);
+
+                                neighbors2.forEach(neighbor2Vertex => {
+                                    if (found) return;
+
+                                    var vec = new THREE.Vector3(array[(vertexIndex * 3)], array[(vertexIndex * 3) + 1], array[(vertexIndex * 3) + 2]);
+                                    var vecA = new THREE.Vector3(array[(neighborDupeVertex * 3)], array[(neighborDupeVertex * 3) + 1], array[(neighborDupeVertex * 3) + 2]);
+                                    var vecB = new THREE.Vector3(array[(neighbor2Vertex * 3)], array[(neighbor2Vertex * 3) + 1], array[(neighbor2Vertex * 3) + 2]);
+
+                                    if (vectorIsBetween(vec, vecA, vecB)) {
+
+                                        if (!curr_sharp_vertex[index].has(vertexIndex) && curr_sharp_vertex[index].has(neighbor2Vertex)) {
+
+                                            var normal1 = curr_sharp_vertex[index].get(neighborDupeVertex);
+                                            var normal2 = curr_sharp_vertex[index].get(neighbor2Vertex);
+
+                                            var newNormalDupeArray = [true, (normal1[1] + normal2[1]) / 2, (normal1[2] + normal2[2]) / 2, (normal1[3] + normal2[3]) / 2, neighborDupeVertex, neighbor2Vertex];
+
+                                            curr_sharp_vertex[index].set(vertexIndex, newNormalDupeArray);
+
+                                            found = true;
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+            }
+        });
+        table = null;
+    }
+
+    function vectorIsBetween(vector, a, b) {
+        var ab = a.add(b);
+        var av = a.add(vector);
+
+        var cross = ab.cross(av);
+        if (Math.abs(cross) > 0.00000001) return false;
+
+        var dot = ab.dot(av);
+        if (dot > 0) return false;
+
+        var distSqrd = ab.distanceToSquared(av);
+        if (dot > distSqrd) return false;
+
+        return true;
     }
 
     function generateBorderTable(index, geometry) {
@@ -552,7 +780,7 @@ var LITHO3D = (function () {
 
     function calculateSurfaceAspectRatio(index, geometry) {
 
-        //We approximate the aspect ration of the surface, combating image reference deformation.
+        //We approximate the aspect ratio of the surface, in order to prevent image reference deformation.
 
         var border = curr_surface_borders[index];
         var positions = geometry.getAttribute("position").array;
@@ -667,8 +895,8 @@ var LITHO3D = (function () {
                         newTexture.center = center;
 
                         //Maintain correct default aspect ratio for image
-                        newTexture.repeat.x = newTexture.repeat.x * referenceImages[index].aspectRatioW * surfaceAspectRatios[index].w;
-                        newTexture.repeat.y = newTexture.repeat.y * referenceImages[index].aspectRatioH * surfaceAspectRatios[index].h;
+                        newTexture.repeat.x = newTexture.repeat.x * referenceImages[index].aspectRatioW * (surfaceAspectRatios[index].enabled ? surfaceAspectRatios[index].w : 1);
+                        newTexture.repeat.y = newTexture.repeat.y * referenceImages[index].aspectRatioH * (surfaceAspectRatios[index].enabled ? surfaceAspectRatios[index].h : 1);
 
                         texture.dispose();
                     }
@@ -683,9 +911,9 @@ var LITHO3D = (function () {
                     processImage(image, index).then(result => {
                         //Apply initial deformation and apply image reference to mesh
                         updateSurface(index, detailLevel, scale).then(result => {
-                            changeReferencePosition(index, newTexture.offset.x, newTexture.offset.y, newTexture.repeat.x, newTexture.repeat.y, newTexture.rotation, scale);
+                            changeReferencePosition(index, newTexture.offset.x, newTexture.offset.y, newTexture.repeat.x, newTexture.repeat.y, newTexture.rotation, surfaceAspectRatios[index].enabled, scale);
                             resolve(result);
-                        });
+                        }).catch(err => { reject(err) });
                     }).catch(err => { reject(err) });
 
                 }, onProgress, onError);
@@ -740,46 +968,49 @@ var LITHO3D = (function () {
      * @param {int} detailLevel The level of detail/subdivisions to control tesselation.
      * @param {float} scale The scale of the extrusion process.
      */
-    function updateSurface(index, detailLevel, scale) {
-        return new Promise((resolve, reject) => {
+    async function updateSurface(index, detailLevel, scale) {
 
-            if (!group_root)
-                reject(new Error("No model is available."));
+        if (!group_root)
+            return Promise.reject(new Error("No model is available."));
 
-            if (lodState[index] != detailLevel && detailLevel > 0) {
+        if (lodState[index] != detailLevel && detailLevel > 0) {
 
-                //We select the correct surface mesh, depending on level of division
-                var geometry = (detailLevel - lodState[index]) < 0 ? og_surfaces[index].clone() : curr_surfaces[index];
+            //We select the correct surface mesh, depending on level of division
+            var geometry = (detailLevel - lodState[index]) < 0 ? og_surfaces[index].clone() : curr_surfaces[index];
 
-                //Reset border vertex/edge table if necessary
-                if ((detailLevel - lodState[index]) < 0)
-                    curr_surface_borders[index] = new Map(og_surface_borders[index]);
+            //Reset border vertex/edge table if necessary
+            if ((detailLevel - lodState[index]) < 0)
+                curr_surface_borders[index] = new Map(og_surface_borders[index]);
 
-                //We tesselate the mesh the necessary amount of times to match resolution/detail level
-                var divisions = (detailLevel - lodState[index]) < 0 ? detailLevel : (detailLevel - lodState[index]);
-                for (var i = 0; i < divisions; i++)
-                    indexedBufferGeometryTesselate(geometry, index);
-
-                //Data management
-                if (surfaces[index].geometry) surfaces[index].geometry.dispose();
-
-                surfaces[index].geometry = surfaceState[index] ? geometry : og_surfaces[index];
-                if ((detailLevel - lodState[index]) < 0)
-                    curr_surfaces[index].dispose();
-
-                curr_surfaces[index] = geometry.clone();
-                lodState[index] = detailLevel;
-
-                //If a reference exists, we apply it.
-                if (textures[index])
-                    applyReference(index, scale, true);
+            //We tesselate the mesh the necessary amount of times to match resolution/detail level
+            var divisions = (detailLevel - lodState[index]) < 0 ? detailLevel : (detailLevel - lodState[index]);
+            for (var i = 0; i < divisions; i++) {
+                await indexedBufferGeometryTesselate(geometry, index);
             }
-            else if (textures[index] && surfaceState[index]) {
-                //The mesh doesn't need subdivision, we only apply the reference.
-                applyReference(index, scale);
-            }
-            resolve(true);
-        });
+
+            //Update sharp edge vertex map
+            if (curr_sharp_vertex[index].size > 0)
+                findSharpVertexes(index, geometry);
+
+            //Data management
+            if (surfaces[index].geometry) surfaces[index].geometry.dispose();
+
+            surfaces[index].geometry = surfaceState[index] ? geometry : og_surfaces[index];
+            if ((detailLevel - lodState[index]) < 0)
+                curr_surfaces[index].dispose();
+
+            curr_surfaces[index] = geometry.clone();
+            lodState[index] = detailLevel;
+
+            //If a reference exists, we apply it.
+            if (textures[index])
+                applyReference(index, scale, true);
+        }
+        else if (textures[index] && surfaceState[index]) {
+            //The mesh doesn't need subdivision, we only apply the reference.
+            applyReference(index, scale);
+        }
+        return true;
     }
 
     /**
@@ -806,30 +1037,64 @@ var LITHO3D = (function () {
             var uvs = geometry.getAttribute("uv").array;
 
             var vector = new THREE.Vector2(0, 0);
-            for (var i = 0; i < count; i++) {
-                var heightValue = lookupReferenceData(uvs[i * 2], uvs[(i * 2) + 1], i, index, vector);
-                var value = refType[index] == REF_TYPE.POSITIVE ? heightValue : 1 - heightValue;
+            var sIdx = 4, heightValue = 0, value = 0;
+            var normalValue = [0, 0, 0];
+            var isSharp = false;
+            var isPositive = refType[index] == REF_TYPE.POSITIVE;
 
-                vertexs[i * 3] += normals[i * 3] * value * scale;
-                vertexs[(i * 3) + 1] += normals[(i * 3) + 1] * value * scale;
-                vertexs[(i * 3) + 2] += normals[(i * 3) + 2] * value * scale;
+            for (var i = 0; i < count; i++) {
+                isSharp = curr_sharp_vertex[index].has(i);
+
+                heightValue = lookupReferenceData(uvs[i * 2], uvs[(i * 2) + 1], i, index, vector, isSharp);
+                value = isPositive ? heightValue : 1 - heightValue;
+
+                //If "sharp", we consider the average of all vertex normal data at the point.
+                if (isSharp) {
+                    var sharpArray = curr_sharp_vertex[index].get(i);
+
+                    normalValue[0] = sharpArray[1];
+                    normalValue[1] = sharpArray[2];
+                    normalValue[2] = sharpArray[3];
+
+                    if (sharpArray.length > 4) {
+
+                        for (sIdx = 4; sIdx < sharpArray.length; sIdx++) {
+                            heightValue = lookupReferenceData(uvs[sharpArray[sIdx] * 2], uvs[(sharpArray[sIdx] * 2) + 1], sharpArray[sIdx], index, vector, true);
+                            value += (isPositive ? heightValue : 1 - heightValue);
+                        }
+                        value = value / (sharpArray.length - 3);
+                    }
+                }
+                else {
+                    normalValue[0] = normals[i * 3];
+                    normalValue[1] = normals[(i * 3) + 1];
+                    normalValue[2] = normals[(i * 3) + 2];
+                }
+
+                vertexs[i * 3] += normalValue[0] * value * scale;
+                vertexs[(i * 3) + 1] += normalValue[1] * value * scale;
+                vertexs[(i * 3) + 2] += normalValue[2] * value * scale;
             }
             vertexs.needsUpdate = true;
             geometry.computeVertexNormals();
 
             surfaces[index].geometry = geometry;
             scaleState[index] = scale;
-
             return true;
         }
         else false;
     }
 
-    function lookupReferenceData(u, v, vertexIndex, index, vec) {
+
+    function lookupReferenceData(u, v, vertexIndex, index, vec, isSharp) {
         vec.set(u, v);
         var uv = textures[index].transformUv(vec);
         var width = referenceImages[index].width;
         var height = referenceImages[index].height;
+
+        //If the UVs belong to the edges of UV/image range or border of surface, return scale value 0 to prevent broken borders.
+        if ((uv.x < 0 || uv.x > 1 || uv.y < 0 || uv.y > 1) || ((uv.x === 0 || uv.x === 1 || uv.y === 0 || uv.y === 1) && surfaceAspectRatios[index].enabled) || (curr_surface_borders[index].has(vertexIndex) && !isSharp))
+            return refType[index] === REF_TYPE.POSITIVE ? 0 : 1;
 
         var ux = uv.x < 0 ? 0 : (uv.x > 1 ? 1 : uv.x);
         var vx = uv.y < 0 ? 0 : (uv.y > 1 ? 1 : uv.y);
@@ -838,13 +1103,7 @@ var LITHO3D = (function () {
         var ty = Math.min(Math.round(vx * height), height - 1);
         var offset = (ty * width + tx);
 
-        var value = referenceImages[index].data[offset];
-
-        //If the UVs belong to the edges of UV/image range or border of surface, return scale value 0 to prevent broken borders.
-        if ((ux <= 0 || ux >= 1 || vx <= 0 || vx >= 1) || curr_surface_borders[index].has(vertexIndex)) {
-            value = refType[index] == REF_TYPE.POSITIVE ? 0 : 1;
-        }
-        return value;
+        return referenceImages[index].data[offset];
     }
 
     /**
@@ -856,7 +1115,7 @@ var LITHO3D = (function () {
         return new Promise((resolve, reject) => {
 
             var onProgress = function (xhr) { };
-            var onError = function (error) { reject(error.message) };
+            var onError = function (error) { reject(error) };
 
             imageLoader.load(image, target => {
 
@@ -1012,15 +1271,18 @@ var LITHO3D = (function () {
      * @param {float} sx Scaling on the X texture axis.
      * @param {float} sy Scaling on the Y texture axis.
      * @param {float} rotation Reference/Texture rotation in radians.
+     * @param {boolean} sar If true, use automatic surface aspect ratio correction.
      * @param {float} scale The scale of the extrusion process.
      */
-    function changeReferencePosition(index, tx, ty, sx, sy, rotation, scale) {
+    function changeReferencePosition(index, tx, ty, sx, sy, rotation, sar, scale) {
 
         var texture = textures[index];
 
         var mat = surfaces[index].material;
         surfaces[index].material = surfaceMaterials[index];
         surfaceMaterials[index].needsUpdate = true;
+        
+        surfaceAspectRatios[index].enabled = sar;
 
         var centerx = 0.5;
         var centery = 0.5;
@@ -1031,8 +1293,8 @@ var LITHO3D = (function () {
 
         texture.center.set(centerx, centery);
         texture.offset.set(px, py);
-        texture.repeat.set(sx / referenceImages[index].aspectRatioW / surfaceAspectRatios[index].w,
-            sy / referenceImages[index].aspectRatioH / surfaceAspectRatios[index].h);
+        texture.repeat.set(sx / referenceImages[index].aspectRatioW / (sar ? surfaceAspectRatios[index].w : 1),
+            sy / referenceImages[index].aspectRatioH / (sar ? surfaceAspectRatios[index].h : 1));
         texture.rotation = rotation;
         texture.needsUpdate = true;
 
@@ -1053,7 +1315,7 @@ var LITHO3D = (function () {
 
     /* TESSELATION UTILS */
 
-    function indexedBufferGeometryTesselate(geometry, index) {
+    async function indexedBufferGeometryTesselate(geometry, index) {
 
         //We tesselate the geometry once, dividing each face.
 
@@ -1061,143 +1323,207 @@ var LITHO3D = (function () {
         var normals = geometry.getAttribute("normal");
         var uvs = geometry.getAttribute("uv");
         var indexes = geometry.index.array;
-
-        var newPositionArray = Array.from(positions.array);
-        var newNormalArray = Array.from(normals.array);
-        var newUVArray = Array.from(uvs.array);
-
         var totalIndexCount = geometry.index.count;
 
+        var newPositionArray = [];
+        var newNormalArray = [];
+        var newUVArray = [];
         var newIndexArray = [];
 
-        if (positions.count + (totalIndexCount / 3) <= Math.pow(2, 8)) {
-            newIndexArray = new Uint8Array(indexes.length * 2);
+        if (window.Worker) {
+
+            return new Promise((resolve, reject) => {
+
+                tesselationWorker.postMessage({
+                    positionCount: positions.count,
+                    totalIndexCount: totalIndexCount,
+                    positions: positions.array.buffer,
+                    normals: normals.array.buffer,
+                    uvs: uvs.array.buffer,
+                    indexes: indexes.buffer,
+                    indexBufferType: indexes.BYTES_PER_ELEMENT
+                }, [positions.array.buffer, normals.array.buffer, uvs.array.buffer, indexes.buffer]);
+
+                tesselationWorker.onmessage = function (result) {
+
+                    newPositionArray = new Float32Array(result.data.newPositionArray);
+                    newNormalArray = new Float32Array(result.data.newNormalArray);
+                    newUVArray = new Float32Array(result.data.newUVArray);
+                    var newBorder = new Uint32Array(result.data.newBorder);
+
+                    if (positions.count + (totalIndexCount / 3) <= Math.pow(2, 8)) {
+                        newIndexArray = new Uint8Array(result.data.newIndexArray);
+                    }
+                    else if (positions.count + (totalIndexCount / 3) <= Math.pow(2, 16)) {
+                        newIndexArray = new Uint16Array(result.data.newIndexArray);
+                    }
+                    else if (positions.count + (totalIndexCount / 3) <= Math.pow(2, 32)) {
+                        newIndexArray = new Uint32Array(result.data.newIndexArray);
+                    }
+                    else newIndexArray = new BigUint64Array(result.data.newIndexArray);
+                    
+                    var border = curr_surface_borders[index];
+
+                    for(var v = 0; v < newBorder.length; v+=3)
+                        updateBorderNewVertex(border, newBorder[v+1], newBorder[v+2], newBorder[v]);
+
+                    geometry.addAttribute("position", new THREE.BufferAttribute(newPositionArray, 3, false));
+                    geometry.addAttribute("normal", new THREE.BufferAttribute(newNormalArray, 3, false));
+                    geometry.addAttribute("uv", new THREE.BufferAttribute(newUVArray, 2, false));
+                    geometry.setIndex(new THREE.BufferAttribute(newIndexArray, 1, false));
+                    geometry.index.needsUpdate = true;
+                    geometry.needsUpdate = true;
+
+                    resolve(true);
+                }
+
+                tesselationWorker.onerror = function(err){
+                    reject(err);
+                }
+            });
         }
-        else if (positions.count + (totalIndexCount / 3) <= Math.pow(2, 16)) {
-            newIndexArray = new Uint16Array(indexes.length * 2);
-        }
-        else if (positions.count + (totalIndexCount / 3) <= Math.pow(2, 32)) {
-            newIndexArray = new Uint32Array(indexes.length * 2);
-        }
-        else newIndexArray = new BigUint64Array(indexes.length * 2);
+        else {
+            newPositionArray = Array.from(positions.array);
+            newNormalArray = Array.from(normals.array);
+            newUVArray = Array.from(uvs.array);
 
-        var mapPositions = new Map();
-
-        for (var i = 0, vertexIdx = 0; i < positions.array.length; i += 3, vertexIdx++) {
-            mapPositions.set("" + positions.array[i] + ":" + positions.array[i + 1] + ":" + positions.array[i + 2], vertexIdx);
-        }
-
-        var vertex1 = [0, 0, 0]; var vertex2 = [0, 0, 0]; var vertex3 = [0, 0, 0];
-        var normal1 = [0, 0, 0]; var normal2 = [0, 0, 0]; var normal3 = [0, 0, 0];
-        var uv1 = [0, 0]; var uv2 = [0, 0]; var uv3 = [0, 0];
-
-        var indexIdx = 0; //Index of current vertex index in the indexes array
-        var currVertexIdx = positions.count; //Index of next vertex to be added
-
-        var border = curr_surface_borders[index];
-
-        for (var indexCount = 0; indexCount * 3 < totalIndexCount; indexCount++) {
-
-            var index1 = indexes[(indexCount * 3)];
-            var index2 = indexes[(indexCount * 3) + 1];
-            var index3 = indexes[(indexCount * 3) + 2];
-
-            vertex1[0] = positions.array[(index1 * 3)];
-            vertex1[1] = positions.array[(index1 * 3) + 1];
-            vertex1[2] = positions.array[(index1 * 3) + 2];
-            vertex2[0] = positions.array[(index2 * 3)];
-            vertex2[1] = positions.array[(index2 * 3) + 1];
-            vertex2[2] = positions.array[(index2 * 3) + 2];
-            vertex3[0] = positions.array[(index3 * 3)];
-            vertex3[1] = positions.array[(index3 * 3) + 1];
-            vertex3[2] = positions.array[(index3 * 3) + 2];
-
-            normal1[0] = normals.array[(index1 * 3)];
-            normal1[1] = normals.array[(index1 * 3) + 1];
-            normal1[2] = normals.array[(index1 * 3) + 2];
-            normal2[0] = normals.array[(index2 * 3)];
-            normal2[1] = normals.array[(index2 * 3) + 1];
-            normal2[2] = normals.array[(index2 * 3) + 2];
-            normal3[0] = normals.array[(index3 * 3)];
-            normal3[1] = normals.array[(index3 * 3) + 1];
-            normal3[2] = normals.array[(index3 * 3) + 2];
-
-            uv1[0] = uvs.array[(index1 * 2)];
-            uv1[1] = uvs.array[(index1 * 2) + 1];
-            uv2[0] = uvs.array[(index2 * 2)];
-            uv2[1] = uvs.array[(index2 * 2) + 1];
-            uv3[0] = uvs.array[(index3 * 2)];
-            uv3[1] = uvs.array[(index3 * 2) + 1];
-
-            //Detect largest edge to divide
-            var dist1 = Math.sqrt(Math.pow((vertex2[0] - vertex1[0]), 2) + Math.pow((vertex2[1] - vertex1[1]), 2) + Math.pow((vertex2[2] - vertex1[2]), 2));
-            var dist2 = Math.sqrt(Math.pow((vertex3[0] - vertex2[0]), 2) + Math.pow((vertex3[1] - vertex2[1]), 2) + Math.pow((vertex3[2] - vertex2[2]), 2));
-            var dist3 = Math.sqrt(Math.pow((vertex3[0] - vertex1[0]), 2) + Math.pow((vertex3[1] - vertex1[1]), 2) + Math.pow((vertex3[2] - vertex1[2]), 2));
-            var maxDist = Math.max(dist1, dist2, dist3);
-
-            //Create 2 new subdivided faces, splitting the largest edge.
-            if (maxDist == dist1) {
-                //Vertex 1
-                newIndexArray[indexIdx++] = index1;
-                //New vertex
-                var newVertex = addNewIndexedVertex(vertex1, normal1, uv1, vertex2, normal2, uv2, indexIdx++, currVertexIdx, mapPositions, newIndexArray, newPositionArray, newNormalArray, newUVArray);
-                if (newVertex === currVertexIdx) currVertexIdx++;
-                updateBorderNewVertex(border, index1, index2, newVertex);
-                //Vertex 3
-                newIndexArray[indexIdx++] = index3;
-                //Vertex 2
-                newIndexArray[indexIdx++] = index2;
-                //Vertex 3
-                newIndexArray[indexIdx++] = index3;
-                //New vertex
-                newIndexArray[indexIdx++] = newVertex;
+            if (positions.count + (totalIndexCount / 3) <= Math.pow(2, 8)) {
+                newIndexArray = new Uint8Array(indexes.length * 2);
             }
-            else if (maxDist == dist2) {
-                //Vertex 1
-                newIndexArray[indexIdx++] = index1;
-                //Vertex 2
-                newIndexArray[indexIdx++] = index2;
-                //New vertex
-                var newVertex = addNewIndexedVertex(vertex2, normal2, uv2, vertex3, normal3, uv3, indexIdx++, currVertexIdx, mapPositions, newIndexArray, newPositionArray, newNormalArray, newUVArray);
-                if (newVertex === currVertexIdx) currVertexIdx++;
-                updateBorderNewVertex(border, index2, index3, newVertex);
-                //Vertex 1
-                newIndexArray[indexIdx++] = index1;
-                //New vertex
-                newIndexArray[indexIdx++] = newVertex;
-                //Vertex 3
-                newIndexArray[indexIdx++] = index3;
+            else if (positions.count + (totalIndexCount / 3) <= Math.pow(2, 16)) {
+                newIndexArray = new Uint16Array(indexes.length * 2);
             }
-            else {
-                //Vertex 1
-                newIndexArray[indexIdx++] = index1;
-                //Vertex 2
-                newIndexArray[indexIdx++] = index2;
-                //New vertex
-                var newVertex = addNewIndexedVertex(vertex1, normal1, uv1, vertex3, normal3, uv3, indexIdx++, currVertexIdx, mapPositions, newIndexArray, newPositionArray, newNormalArray, newUVArray);
-                if (newVertex === currVertexIdx) currVertexIdx++;
-                updateBorderNewVertex(border, index1, index3, newVertex);
-                //Vertex 2
-                newIndexArray[indexIdx++] = index2;
-                //Vertex 3
-                newIndexArray[indexIdx++] = index3;
-                //New vertex
-                newIndexArray[indexIdx++] = newVertex;
+            else if (positions.count + (totalIndexCount / 3) <= Math.pow(2, 32)) {
+                newIndexArray = new Uint32Array(indexes.length * 2);
             }
+            else newIndexArray = new BigUint64Array(indexes.length * 2);
+
+            var mapPositions = new Map();
+
+            for (var i = 0; i < positions.count; i++) {
+                var key = positions.array[(i * 3)] + positions.array[(i * 3) + 1] + positions.array[(i * 3) + 2]
+                    + normals.array[(i * 3)] + normals.array[(i * 3) + 1] + normals.array[(i * 3) + 2]
+                    + uvs.array[(i * 2)] + uvs.array[(i * 2) + 1];
+                if (!mapPositions.has(key))
+                    mapPositions.set(key, [i]);
+                else
+                    mapPositions.get(key).push(i);
+            }
+
+            var vertex1 = [0, 0, 0]; var vertex2 = [0, 0, 0]; var vertex3 = [0, 0, 0];
+            var normal1 = [0, 0, 0]; var normal2 = [0, 0, 0]; var normal3 = [0, 0, 0];
+            var uv1 = [0, 0]; var uv2 = [0, 0]; var uv3 = [0, 0];
+
+            var indexIdx = 0; //Index of current vertex index in the indexes array
+            var currVertexIdx = positions.count; //Index of next vertex to be added
+
+            var border = curr_surface_borders[index];
+
+            for (var indexCount = 0; indexCount * 3 < totalIndexCount; indexCount++) {
+
+                var index1 = indexes[(indexCount * 3)];
+                var index2 = indexes[(indexCount * 3) + 1];
+                var index3 = indexes[(indexCount * 3) + 2];
+
+                vertex1[0] = positions.array[(index1 * 3)];
+                vertex1[1] = positions.array[(index1 * 3) + 1];
+                vertex1[2] = positions.array[(index1 * 3) + 2];
+                vertex2[0] = positions.array[(index2 * 3)];
+                vertex2[1] = positions.array[(index2 * 3) + 1];
+                vertex2[2] = positions.array[(index2 * 3) + 2];
+                vertex3[0] = positions.array[(index3 * 3)];
+                vertex3[1] = positions.array[(index3 * 3) + 1];
+                vertex3[2] = positions.array[(index3 * 3) + 2];
+
+                normal1[0] = normals.array[(index1 * 3)];
+                normal1[1] = normals.array[(index1 * 3) + 1];
+                normal1[2] = normals.array[(index1 * 3) + 2];
+                normal2[0] = normals.array[(index2 * 3)];
+                normal2[1] = normals.array[(index2 * 3) + 1];
+                normal2[2] = normals.array[(index2 * 3) + 2];
+                normal3[0] = normals.array[(index3 * 3)];
+                normal3[1] = normals.array[(index3 * 3) + 1];
+                normal3[2] = normals.array[(index3 * 3) + 2];
+
+                uv1[0] = uvs.array[(index1 * 2)];
+                uv1[1] = uvs.array[(index1 * 2) + 1];
+                uv2[0] = uvs.array[(index2 * 2)];
+                uv2[1] = uvs.array[(index2 * 2) + 1];
+                uv3[0] = uvs.array[(index3 * 2)];
+                uv3[1] = uvs.array[(index3 * 2) + 1];
+
+                //Detect largest edge to divide
+                var dist1 = Math.sqrt(Math.pow((vertex2[0] - vertex1[0]), 2) + Math.pow((vertex2[1] - vertex1[1]), 2) + Math.pow((vertex2[2] - vertex1[2]), 2));
+                var dist2 = Math.sqrt(Math.pow((vertex3[0] - vertex2[0]), 2) + Math.pow((vertex3[1] - vertex2[1]), 2) + Math.pow((vertex3[2] - vertex2[2]), 2));
+                var dist3 = Math.sqrt(Math.pow((vertex3[0] - vertex1[0]), 2) + Math.pow((vertex3[1] - vertex1[1]), 2) + Math.pow((vertex3[2] - vertex1[2]), 2));
+                var maxDist = Math.max(dist1, dist2, dist3);
+
+                //Create 2 new subdivided faces, splitting the largest edge.
+                if (maxDist == dist1) {
+                    //Vertex 1
+                    newIndexArray[indexIdx++] = index1;
+                    //New vertex
+                    var newVertex = addNewIndexedVertex(vertex1, normal1, uv1, vertex2, normal2, uv2, indexIdx++, currVertexIdx, mapPositions, newIndexArray, newPositionArray, newNormalArray, newUVArray);
+                    if (newVertex === currVertexIdx) currVertexIdx++;
+                    updateBorderNewVertex(border, index1, index2, newVertex);
+                    //Vertex 3
+                    newIndexArray[indexIdx++] = index3;
+                    //Vertex 2
+                    newIndexArray[indexIdx++] = index2;
+                    //Vertex 3
+                    newIndexArray[indexIdx++] = index3;
+                    //New vertex
+                    newIndexArray[indexIdx++] = newVertex;
+                }
+                else if (maxDist == dist2) {
+                    //Vertex 1
+                    newIndexArray[indexIdx++] = index1;
+                    //Vertex 2
+                    newIndexArray[indexIdx++] = index2;
+                    //New vertex
+                    var newVertex = addNewIndexedVertex(vertex2, normal2, uv2, vertex3, normal3, uv3, indexIdx++, currVertexIdx, mapPositions, newIndexArray, newPositionArray, newNormalArray, newUVArray);
+                    if (newVertex === currVertexIdx) currVertexIdx++;
+                    updateBorderNewVertex(border, index2, index3, newVertex);
+                    //Vertex 1
+                    newIndexArray[indexIdx++] = index1;
+                    //New vertex
+                    newIndexArray[indexIdx++] = newVertex;
+                    //Vertex 3
+                    newIndexArray[indexIdx++] = index3;
+                }
+                else {
+                    //Vertex 1
+                    newIndexArray[indexIdx++] = index1;
+                    //Vertex 2
+                    newIndexArray[indexIdx++] = index2;
+                    //New vertex
+                    var newVertex = addNewIndexedVertex(vertex1, normal1, uv1, vertex3, normal3, uv3, indexIdx++, currVertexIdx, mapPositions, newIndexArray, newPositionArray, newNormalArray, newUVArray);
+                    if (newVertex === currVertexIdx) currVertexIdx++;
+                    updateBorderNewVertex(border, index1, index3, newVertex);
+                    //Vertex 2
+                    newIndexArray[indexIdx++] = index2;
+                    //Vertex 3
+                    newIndexArray[indexIdx++] = index3;
+                    //New vertex
+                    newIndexArray[indexIdx++] = newVertex;
+                }
+            }
+
+            newPositionArray = Float32Array.from(newPositionArray);
+            newNormalArray = Float32Array.from(newNormalArray);
+            newUVArray = Float32Array.from(newUVArray);
+
+            geometry.addAttribute("position", new THREE.BufferAttribute(newPositionArray, 3, false));
+            geometry.addAttribute("normal", new THREE.BufferAttribute(newNormalArray, 3, false));
+            geometry.addAttribute("uv", new THREE.BufferAttribute(newUVArray, 2, false));
+            geometry.setIndex(new THREE.BufferAttribute(newIndexArray, 1, false));
+            geometry.index.needsUpdate = true;
+            geometry.needsUpdate = true;
+
+            mapPositions = null;
+
+            return true;
         }
-
-        newPositionArray = Float32Array.from(newPositionArray);
-        newNormalArray = Float32Array.from(newNormalArray);
-        newUVArray = Float32Array.from(newUVArray);
-
-        geometry.addAttribute("position", new THREE.BufferAttribute(newPositionArray, 3, false));
-        geometry.addAttribute("normal", new THREE.BufferAttribute(newNormalArray, 3, false));
-        geometry.addAttribute("uv", new THREE.BufferAttribute(newUVArray, 2, false));
-        geometry.setIndex(new THREE.BufferAttribute(newIndexArray, 1, false));
-        geometry.index.needsUpdate = true;
-        geometry.needsUpdate = true;
-
-        mapPositions = null;
     }
 
     function updateBorderNewVertex(border, index1, index2, newVertex) {
@@ -1216,26 +1542,41 @@ var LITHO3D = (function () {
         var posVy = (vertex1[1] + vertex2[1]) / 2;
         var posVz = (vertex1[2] + vertex2[2]) / 2;
 
-        var addedIndex = 0;
+        var norVx = (normal1[0] + normal2[0]) / 2;
+        var norVy = (normal1[1] + normal2[1]) / 2;
+        var norVz = (normal1[2] + normal2[2]) / 2;
 
-        var mapId = "" + posVx + ":" + posVy + ":" + posVz;
+        var round = Math.pow(10, 6);
+        var uvVu = (Math.round((uv1[0] + uv2[0]) * round) / round) / 2;
+        var uvVv = (Math.round((uv1[1] + uv2[1]) * round) / round) / 2;
+
+        var addedIndex = -1;
+
+        var mapId = posVx + posVy + posVz + norVx + norVy + norVz + uvVu + uvVv;
 
         if (map.has(mapId)) {
-            addedIndex = map.get(mapId);
+            var indexes = map.get(mapId);
+
+            for (var idx in indexes) {
+                if (positionArray[(idx * 3)] === posVx && positionArray[(idx * 3) + 1] === posVy && positionArray[(idx * 3) + 2] === posVz
+                    && normalArray[(idx * 3)] === norVx && normalArray[(idx * 3) + 1] === norVy && normalArray[(idx * 3) + 2] === norVz
+                    && UVArray[(idx * 2)] === uvVu && UVArray[(idx * 2) + 1] === uvVv) {
+                    addedIndex = idx;
+                    break;
+                }
+            }
+        }
+        if (addedIndex !== -1) {
             indexArray[indexIdx] = addedIndex;
         }
         else {
-            var norVx = (normal1[0] + normal2[0]) / 2;
-            var norVy = (normal1[1] + normal2[1]) / 2;
-            var norVz = (normal1[2] + normal2[2]) / 2;
-
-            var round = Math.pow(10, 6);
-            var uvVu = (Math.round((uv1[0] + uv2[0]) * round) / round) / 2;
-            var uvVv = (Math.round((uv1[1] + uv2[1]) * round) / round) / 2;
-
-            indexArray[indexIdx] = currVertexIdx;
-            map.set(mapId, currVertexIdx);
             addedIndex = currVertexIdx;
+            indexArray[indexIdx] = currVertexIdx;
+
+            if (!map.has(mapId))
+                map.set(mapId, [currVertexIdx]);
+            else
+                map.get(mapId).push(currVertexIdx);
 
             positionArray.push(posVx, posVy, posVz);
             normalArray.push(norVx, norVy, norVz);
@@ -1404,7 +1745,7 @@ var LITHO3D = (function () {
     function downloadGLTF(xF = 1, yF = 1, zF = 1, change = true, binary = true) {
         return new Promise((resolve, reject) => {
             if (group_root) {
-                
+
                 //If web workers are supported, we assign one the task.
                 if (window.Worker) {
                     var exporter = new Worker('./libs/exportWorker.js');
@@ -1434,7 +1775,7 @@ var LITHO3D = (function () {
                     var exporter = new THREE.GLTFExporter();
 
                     var onComplete = function (result) {
-                        var blob = new Blob([result], { type: (binary ? 'model/gltf-binary' : 'model/gltf+json' ) });
+                        var blob = new Blob([result], { type: (binary ? 'model/gltf-binary' : 'model/gltf+json') });
                         saveAs(blob, "model" + (binary ? '.glb' : 'gltf'));
                         resolve(true);
                     };
@@ -1460,9 +1801,9 @@ var LITHO3D = (function () {
                     else
                         exporter.parse(group_root, onComplete, { forceIndices: true, binary: binary });
                 }
-        }
-        else
-            reject(new Error("No model available for download."));
+            }
+            else
+                reject(new Error("No model available for download."));
         });
     }
 
@@ -1477,7 +1818,7 @@ var LITHO3D = (function () {
 
         //JSON structure
         var json_obj = {
-            version: "r1.0.0",
+            version: "r1.0.1",
             model_type: "",
             model_file: "",
             model_format: "",
@@ -1519,6 +1860,7 @@ var LITHO3D = (function () {
             surfaceObj.resolution = lodState[i];
             surfaceObj.referenceType = refType[i];
             surfaceObj.extrusionScale = scaleState[i];
+            surfaceObj.surfaceAspectEnabled = surfaceAspectRatios[i].enabled;
 
             json_obj.surfaces.push(surfaceObj);
         }
@@ -1718,10 +2060,11 @@ var LITHO3D = (function () {
             return zip.generateAsync({
                 type: "blob",
                 compression: "DEFLATE",
+                mimeType: "application/x-7z-compressed",
                 compressionOptions: { level: 2 }
             }, updateCallback
             ).then(function (blob) {
-                saveAs(blob, "model" + '.zip');
+                saveAs(blob, "model" + '.7z');
                 return true;
             })
         });
@@ -1749,6 +2092,7 @@ var LITHO3D = (function () {
             return zip.generateAsync({
                 type: "blob",
                 compression: "DEFLATE",
+                mimeType: "application/x-7z-compressed",
                 compressionOptions: { level: 2 }
             }, updateCallback
             ).then(function (blob) {
@@ -1820,7 +2164,7 @@ var LITHO3D = (function () {
             //Valid inputs
             json && zip && typeof (json) === 'object' &&
             //Correct version
-            json.version === "r1.0.0" &&
+            json.version === "r1.0.1" &&
             //Matching surface counts
             json.surfaceCount === json.surfaces.length &&
             //Matching image counts
@@ -1841,7 +2185,7 @@ var LITHO3D = (function () {
             //Mandatory surface fields
             json.surfaces.every((surface) => {
                 return (!isNaN(surface.translateX) && !isNaN(surface.translateY) && !isNaN(surface.scaleX) && !isNaN(surface.scaleY) && !isNaN(surface.scaleY) &&
-                    !isNaN(surface.extrusionScale) && !isNaN(surface.resolution) && [REF_TYPE.POSITIVE, REF_TYPE.NEGATIVE].includes(surface.referenceType));
+                    !isNaN(surface.extrusionScale) && !isNaN(surface.resolution) && "surfaceAspectEnabled" in surface && [REF_TYPE.POSITIVE, REF_TYPE.NEGATIVE].includes(surface.referenceType));
             });
 
         return validity;
@@ -1870,6 +2214,7 @@ var LITHO3D = (function () {
                 surfaceDetail["extrusion"] = json.surfaces[index].extrusionScale;
                 surfaceDetail["resolution"] = json.surfaces[index].resolution;
                 surfaceDetail["reference"] = json.surfaces[index].referenceType;
+                surfaceDetail["surfaceAspectEnabled"] = json.surfaces[index].surfaceAspectEnabled;
                 surfaceDetail["state"] = json.surfaces[index].state;
             });
             return surfaceList;
@@ -1894,7 +2239,7 @@ var LITHO3D = (function () {
                 return addReference(surfaceIndex, imageURL, json.surfaces[surfaceIndex].resolution, json.surfaces[surfaceIndex].extrusionScale)
                     .then(() => {
                         //Reinstate reference configurations
-                        changeReferencePosition(surfaceIndex, json.surfaces[surfaceIndex].translateX, json.surfaces[surfaceIndex].translateY, json.surfaces[surfaceIndex].scaleX, json.surfaces[surfaceIndex].scaleY, json.surfaces[surfaceIndex].rotation, json.surfaces[surfaceIndex].extrusionScale);
+                        changeReferencePosition(surfaceIndex, json.surfaces[surfaceIndex].translateX, json.surfaces[surfaceIndex].translateY, json.surfaces[surfaceIndex].scaleX, json.surfaces[surfaceIndex].scaleY, json.surfaces[surfaceIndex].rotation, json.surfaces[surfaceIndex].surfaceAspectEnabled, json.surfaces[surfaceIndex].extrusionScale);
                         changeReferenceType(surfaceIndex, json.surfaces[surfaceIndex].referenceType, json.surfaces[surfaceIndex].extrusionScale);
                         changeReferenceState(surfaceIndex, json.surfaces[surfaceIndex].state, json.surfaces[surfaceIndex].extrusionScale);
                         return true;

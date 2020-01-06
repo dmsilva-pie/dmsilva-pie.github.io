@@ -13,7 +13,7 @@ onmessage = function (e) {
     var translateFactor = { x: e.data[3], y: e.data[4], z: e.data[5] };
     var SCALE_UNIFORM = [e.data[6], e.data[7], e.data[8]];
     var change = e.data[9];
-    var group_root = scene.children[2];
+    var group_root = scene.children[3];
 
     //Export model in correct format, return URL to created Blob
     if (e.data[0] === "obj") {
