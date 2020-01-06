@@ -125,8 +125,8 @@ Para questões ou feedback, por favor contacte os autores:
 #### TODO LIST
 
 - [x] Desenvolver README
-- [ ] Lidar com questões de linguagem.
-- [ ] Lidar com desconfiança de ficheiros zip.
+- [x] Lidar com desconfiança de ficheiros zip.
+- [ ] Lidar com questões de linguagem?
 - [ ] Lidar com integração.
 - [ ] Decidir o que fazer acerca de [reconstruction].
 - [ ] ???
